@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(awk -F',' 'NR > 1 {print $9}' /Users/ayushkumar/Desktop/Columbia/Agentic_AI/Assignments/Assignment_3/NADAC.csv)",
+      "Bash(python -m venv .venv)",
+      "Bash(.venv/bin/pip install *)",
+      "Bash(python3 -m venv .venv)",
+      "Read(//usr/local/bin/**)",
+      "Read(//opt/homebrew/bin/**)",
+      "Bash(/usr/local/bin/python3.13 -m venv .venv)",
+      "Bash(.venv/bin/python3 -c ' *)"
+    ]
+  }
+}

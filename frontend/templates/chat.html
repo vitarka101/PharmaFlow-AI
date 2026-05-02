@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Prescription Advisor — PharmaFlow AI</title>
+  <link rel="stylesheet" href="/static/css/styles.css" />
+</head>
+<body>
+
+<header>
+  <div>
+    <h1>PharmaFlow AI</h1>
+    <div class="subtitle">Prescription Advisor</div>
+  </div>
+  <div class="header-right">
+    Powered by CMS NADAC + FDA Orange Book<br/>
+    Synthetic Demo Data · Not Clinical Decision Support
+  </div>
+</header>
+
+<nav class="topnav">
+  <a href="/" class="active">Prescription Advisor</a>
+  <a href="/dashboard">Dashboard</a>
+  <a href="/members">Members</a>
+</nav>
+
+<main class="chat-layout">
+
+  <!-- Left: Current session panel -->
+  <div class="chat-sidebar">
+    <div class="chat-sidebar-header">
+      <h3>Session Summary</h3>
+      <button class="btn-clear" onclick="clearSession()">New Session</button>
+    </div>
+
+    <div id="session-empty" class="session-empty">
+      <div style="font-size:32px;margin-bottom:8px">💊</div>
+      <div>Upload a claims file or type a drug name to begin.</div>
+    </div>
+
+    <div id="session-stats" style="display:none">
+      <div class="stat-row"><span class="stat-label">Drugs analyzed</span><span class="stat-val" id="stat-analyzed">—</span></div>
+      <div class="stat-row"><span class="stat-label">Alternatives found</span><span class="stat-val" id="stat-found">—</span></div>
+      <div class="stat-row"><span class="stat-label">Gross savings</span><span class="stat-val green" id="stat-gross">—</span></div>
+      <div class="stat-row"><span class="stat-label">Risk-adj. savings</span><span class="stat-val green" id="stat-risk">—</span></div>
+      <div class="session-bands" id="session-bands"></div>
+    </div>
+
+    <div id="session-results-list" style="margin-top:16px"></div>
+  </div>
+
+  <!-- Right: Chat window -->
+  <div class="chat-main">
+
+    <!-- Message thread -->
+    <div class="chat-thread" id="chat-thread">
+      <div class="msg msg-system">
+        <div class="msg-avatar">🤖</div>
+        <div class="msg-bubble">
+          <strong>PharmaFlow Advisor</strong><br/>
+          Hello! I can help you find generic alternatives and estimate savings.
+          You can:<br/><br/>
+          • <strong>Upload a claims CSV</strong> — I'll analyze each drug and find alternatives<br/>
+          • <strong>Type drug names</strong> — e.g. "Lipitor, Abilify" for a quick lookup<br/><br/>
+          All results are for payer/pharmacist review only, not clinical advice.
+        </div>
+      </div>
+    </div>
+
+    <!-- Input area -->
+    <div class="chat-input-area">
+
+      <!-- File upload drop zone -->
+      <div class="upload-zone" id="upload-zone"
+           ondragover="event.preventDefault();this.classList.add('drag-over')"
+           ondragleave="this.classList.remove('drag-over')"
+           ondrop="handleDrop(event)">
+        <input type="file" id="file-input" accept=".csv" style="display:none" onchange="handleFileSelect()" />
+        <span id="upload-label">
+          📎 <button class="link-btn" onclick="document.getElementById('file-input').click()">Upload claims CSV</button>
+          or drag &amp; drop
+        </span>
+        <span id="file-ready" style="display:none;color:var(--recommend);font-weight:600"></span>
+      </div>
+
+      <div class="chat-row">
+        <textarea
+          id="msg-input"
+          placeholder="Type drug names (comma-separated) e.g. Lipitor, Abilify, Provigil…"
+          rows="2"
+          onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendMessage();}"
+        ></textarea>
+        <button class="btn-send" id="send-btn" onclick="sendMessage()">
+          Send &#9658;
+        </button>
+      </div>
+
+      <div class="chat-input-hint">
+        Press Enter to send · Shift+Enter for new line · CSV: needs <code>drug_name</code> column
+      </div>
+    </div>
+  </div>
+
+</main>
+
+<footer>
+  PharmaFlow AI &mdash; Capstone Demo &middot; Columbia University &middot; All member data is synthetic.
+</footer>
+
+<script src="/static/js/chat.js"></script>
+</body>
+</html>

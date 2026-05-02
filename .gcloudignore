@@ -1,0 +1,10 @@
+.gcloudignore
+.gitignore
+.venv/
+__pycache__/
+*.pyc
+.DS_Store
+.env
+data/warehouse/
+artifacts/
+*.pdf

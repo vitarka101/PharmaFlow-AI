@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>PharmaFlow AI — Payer Dashboard</title>
+  <link rel="stylesheet" href="/static/css/styles.css" />
+</head>
+<body>
+
+<header>
+  <div>
+    <h1>PharmaFlow AI</h1>
+    <div class="subtitle">Payer Pharmacy Benefit Analysis</div>
+  </div>
+  <div class="header-right">
+    Powered by CMS NADAC + FDA Orange Book<br/>
+    Synthetic Demo Data · Not Clinical Decision Support
+  </div>
+</header>
+
+<nav class="topnav">
+  <a href="/">Prescription Advisor</a>
+  <a href="/dashboard" class="active">Dashboard</a>
+  <a href="/members">Members</a>
+</nav>
+
+<main>
+
+  <!-- Summary cards -->
+  <div class="summary-grid">
+    <div class="card">
+      <div class="label">Total Gross Savings</div>
+      <div class="value green" id="card-gross">—</div>
+      <div class="sub">Gross pharmacy savings (pre-rebate)</div>
+    </div>
+    <div class="card">
+      <div class="label">Risk-Adjusted Savings</div>
+      <div class="value green" id="card-risk-adj">—</div>
+      <div class="sub">After clinical &amp; adherence risk</div>
+    </div>
+    <div class="card">
+      <div class="label">Opportunities</div>
+      <div class="value" id="card-total">—</div>
+      <div class="sub">Total switch candidates</div>
+    </div>
+    <div class="card">
+      <div class="label">Recommend</div>
+      <div class="value green" id="card-recommend">—</div>
+      <div class="sub">Low clinical &amp; access risk</div>
+    </div>
+    <div class="card">
+      <div class="label">Review</div>
+      <div class="value amber" id="card-review">—</div>
+      <div class="sub">Clinical or access flags</div>
+    </div>
+    <div class="card">
+      <div class="label">Do Not Switch</div>
+      <div class="value red" id="card-blocked">—</div>
+      <div class="sub">Negative risk-adj. savings or high risk</div>
+    </div>
+  </div>
+
+  <!-- Filters -->
+  <div class="filters">
+    <div class="filter-group">
+      <label>Recommendation Band</label>
+      <select id="f-band" onchange="applyFiltersAndRender()">
+        <option value="">All</option>
+        <option value="Recommend">Recommend</option>
+        <option value="Review">Review</option>
+        <option value="Do Not Switch">Do Not Switch</option>
+      </select>
+    </div>
+    <div class="filter-group">
+      <label>Equivalence Type</label>
+      <select id="f-equiv" onchange="applyFiltersAndRender()">
+        <option value="">All</option>
+        <option value="GENERIC_EQUIVALENT">Generic Equivalent</option>
+        <option value="THERAPEUTIC_ALTERNATIVE">Therapeutic Alternative</option>
+      </select>
+    </div>
+    <div class="filter-group">
+      <label>Min Risk-Adj. Savings ($)</label>
+      <input type="number" id="f-min-savings" placeholder="e.g. 50" oninput="applyFiltersAndRender()" step="1" />
+    </div>
+    <div class="filter-group">
+      <label>Max Clinical Risk (0–1)</label>
+      <input type="number" id="f-max-clinical" placeholder="e.g. 0.3" oninput="applyFiltersAndRender()" step="0.05" min="0" max="1" />
+    </div>
+    <button class="btn-clear" onclick="clearFilters()">Clear Filters</button>
+  </div>
+
+  <!-- Opportunity table -->
+  <div class="table-wrap">
+    <div class="table-header">
+      <h2>Switch Opportunities</h2>
+      <span id="result-count"></span>
+    </div>
+    <table>
+      <thead>
+        <tr>
+          <th style="width:32px"></th>
+          <th>Member</th>
+          <th>Current Drug</th>
+          <th>Generic Alternative</th>
+          <th>Equivalence</th>
+          <th class="sortable" onclick="setSort('gross_savings')">Gross Savings &#8597;</th>
+          <th class="sortable" onclick="setSort('risk_adjusted_savings')">Risk-Adj. Savings &#8597;</th>
+          <th class="sortable" onclick="setSort('clinical_risk_score')">Clinical Risk &#8597;</th>
+          <th class="sortable" onclick="setSort('access_risk_score')">Access Risk &#8597;</th>
+          <th>Band</th>
+        </tr>
+      </thead>
+      <tbody id="table-body">
+        <tr><td colspan="10" class="loading">Loading opportunities&hellip;</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+</main>
+
+<footer>
+  PharmaFlow AI &mdash; Capstone Demo &middot; Columbia University &middot; Agentic AI &middot; 2026 &middot;
+  Drug pricing: CMS NADAC (April 2026) &middot; Equivalence: FDA Orange Book &middot;
+  All member data is synthetic.
+</footer>
+
+<script src="/static/js/dashboard.js"></script>
+</body>
+</html>

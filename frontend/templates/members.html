@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Members — PharmaFlow AI</title>
+  <link rel="stylesheet" href="/static/css/styles.css" />
+</head>
+<body>
+
+<header>
+  <div>
+    <h1>PharmaFlow AI</h1>
+    <div class="subtitle">Payer Pharmacy Benefit Analysis</div>
+  </div>
+  <div class="header-right">
+    Powered by CMS NADAC + FDA Orange Book<br/>
+    Synthetic Demo Data · Not Clinical Decision Support
+  </div>
+</header>
+
+<nav class="topnav">
+  <a href="/">Prescription Advisor</a>
+  <a href="/dashboard">Dashboard</a>
+  <a href="/members" class="active">Members</a>
+</nav>
+
+<main>
+
+  <!-- Member summary cards -->
+  <div class="summary-grid" id="member-summary-cards">
+    <div class="card">
+      <div class="label">Total Members</div>
+      <div class="value" id="ms-total">—</div>
+      <div class="sub">With switch opportunities</div>
+    </div>
+    <div class="card">
+      <div class="label">Members: Recommend</div>
+      <div class="value green" id="ms-recommend">—</div>
+      <div class="sub">All opportunities low risk</div>
+    </div>
+    <div class="card">
+      <div class="label">Members: Review</div>
+      <div class="value amber" id="ms-review">—</div>
+      <div class="sub">At least one clinical/access flag</div>
+    </div>
+    <div class="card">
+      <div class="label">Avg Risk-Adj. Savings</div>
+      <div class="value green" id="ms-avg-savings">—</div>
+      <div class="sub">Per member, per fill cycle</div>
+    </div>
+  </div>
+
+  <!-- Members table -->
+  <div class="table-wrap" style="margin-bottom:24px">
+    <div class="table-header">
+      <h2>Member History</h2>
+      <div style="display:flex;gap:12px;align-items:center">
+        <input id="member-search" type="text" placeholder="Search member ID…"
+               oninput="filterMembers()" style="padding:5px 10px;border:1px solid var(--border);border-radius:5px;font-size:13px;width:200px" />
+        <span id="member-count" style="font-size:12px;color:var(--text-muted)"></span>
+      </div>
+    </div>
+    <table>
+      <thead>
+        <tr>
+          <th>Member ID</th>
+          <th class="sortable" onclick="sortMembers('claim_count')">Claims &#8597;</th>
+          <th class="sortable" onclick="sortMembers('drug_count')">Drugs &#8597;</th>
+          <th class="sortable" onclick="sortMembers('total_gross_savings')">Gross Savings &#8597;</th>
+          <th class="sortable" onclick="sortMembers('total_risk_adjusted_savings')">Risk-Adj. Savings &#8597;</th>
+          <th class="sortable" onclick="sortMembers('recommend_count')">Recommend &#8597;</th>
+          <th class="sortable" onclick="sortMembers('review_count')">Review &#8597;</th>
+          <th>Overall Band</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody id="members-tbody">
+        <tr><td colspan="9" class="loading">Loading members…</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <!-- Member detail panel (shown when a member is selected) -->
+  <div id="member-detail-panel" style="display:none">
+    <div class="table-wrap">
+      <div class="table-header">
+        <h2 id="detail-member-title">Member Detail</h2>
+        <div style="display:flex;gap:12px;align-items:center">
+          <div id="detail-summary-inline" style="font-size:13px;color:var(--text-muted)"></div>
+          <button onclick="closeDetail()" style="padding:5px 12px;border:1px solid var(--border);border-radius:5px;cursor:pointer;font-size:12px">✕ Close</button>
+        </div>
+      </div>
+      <table>
+        <thead>
+          <tr>
+            <th style="width:32px"></th>
+            <th>Current Drug</th>
+            <th>Generic Alternative</th>
+            <th>Equivalence</th>
+            <th>Gross Savings</th>
+            <th>Risk-Adj. Savings</th>
+            <th>Clinical Risk</th>
+            <th>Band</th>
+          </tr>
+        </thead>
+        <tbody id="detail-tbody">
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+</main>
+
+<footer>
+  PharmaFlow AI &mdash; Capstone Demo &middot; Columbia University &middot; All member data is synthetic.
+</footer>
+
+<script src="/static/js/members.js"></script>
+</body>
+</html>
