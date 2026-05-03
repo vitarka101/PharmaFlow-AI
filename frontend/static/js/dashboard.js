@@ -13,6 +13,11 @@ let currentPlan = "";
 // ── Fetch & render ────────────────────────────────────────────────────────
 
 async function init() {
+  // Restore saved plan/filter state across tab navigations
+  const savedPlan = sessionStorage.getItem("pf_plan") || "PLAN-GOLD-001";
+  const planEl = document.getElementById("f-plan");
+  if (planEl) planEl.value = savedPlan;
+
   try {
     const [summary, recs] = await Promise.all([
       fetch(API.dashboard).then(r => r.json()),
@@ -21,7 +26,6 @@ async function init() {
     renderSummary(summary);
     allRecs = recs;
     applyFiltersAndRender();
-    applyPlanTier("PLAN-GOLD-001");
     renderCharts(recs);
     document.getElementById("charts-section").style.display = "grid";
   } catch (err) {
@@ -75,6 +79,13 @@ function applyPlanTier(plan) {
 
 function applyFiltersAndRender() {
   const plan       = (document.getElementById("f-plan")?.value || "");
+  // If plan changed, clear chat session so it resets on next visit
+  if (plan && plan !== sessionStorage.getItem("pf_plan")) {
+    ["pf_thread_html","pf_sidebar_html","pf_bands_html","pf_stats","pf_history","pf_session_id"].forEach(k => sessionStorage.removeItem(k));
+    sessionStorage.setItem("pf_plan", plan);
+  } else if (plan) {
+    sessionStorage.setItem("pf_plan", plan);
+  }
   currentPlan = plan;
   applyPlanTier(plan);
   const band       = document.getElementById("f-band").value;
@@ -93,6 +104,17 @@ function applyFiltersAndRender() {
                         (r.candidate_alternative || "").toLowerCase().includes(drugSearch))) return false;
     return true;
   });
+
+  // Deduplicate: keep best (highest risk_adjusted_savings) row per unique drug pair
+  const seen = new Map();
+  for (const r of recs) {
+    const key = `${(r.current_drug || "").toUpperCase()}||${(r.candidate_alternative || "").toUpperCase()}`;
+    const existing = seen.get(key);
+    if (!existing || r.risk_adjusted_savings > existing.risk_adjusted_savings) {
+      seen.set(key, r);
+    }
+  }
+  recs = Array.from(seen.values());
 
   // Sort
   recs.sort((a, b) => sortDir * (b[sortCol] - a[sortCol]));
@@ -163,8 +185,8 @@ function renderTable(recs) {
     const mainRow = `
       <tr class="main-row" data-i="${i}">
         <td><button class="expand-btn" onclick="toggleDetail(${i})">&#9654;</button></td>
-        <td><div style="max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${r.current_drug}">${r.current_drug}</div></td>
-        <td><div style="max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${r.candidate_alternative}">${r.candidate_alternative}</div></td>
+        <td><div style="min-width:160px;white-space:nowrap" title="${r.current_drug}">${r.current_drug}</div></td>
+        <td><div style="min-width:160px;white-space:nowrap" title="${r.candidate_alternative}">${r.candidate_alternative}</div></td>
         <td>${equivBadge(r.equivalence_type)}</td>
         <td>${savingsCell(r.gross_savings)}</td>
         <td>${savingsCell(r.risk_adjusted_savings)}</td>

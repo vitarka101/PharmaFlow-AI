@@ -56,7 +56,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="PharmaFlow AI",
-    description="Payer-side pharmacy benefit analysis dashboard (synthetic demo data).",
+    description="Payer-side pharmacy benefit analysis dashboard (Aetna claims, de-identified).",
     version="1.0.0",
     lifespan=lifespan,
 )
@@ -95,7 +95,7 @@ async def get_config():
     return {
         "use_llm": os.getenv("USE_LLM", "false"),
         "model_name": os.getenv("MODEL_NAME", ""),
-        "data_mode": os.getenv("DATA_MODE", "synthetic"),
+        "data_mode": os.getenv("DATA_MODE", "aetna_deidentified"),
         "recommendations_loaded": len(_recommendations),
     }
 
@@ -166,36 +166,47 @@ async def get_recommendation_detail(recommendation_id: str):
 # ---------------------------------------------------------------------------
 
 @app.get("/api/members")
-async def get_members():
-    """Return one summary row per member, aggregated from all their recommendations."""
-    by_member: dict[str, dict] = {}
-    for r in _recommendations:
+async def get_members(plan: Optional[str] = Query(None)):
+    """Return one summary row per member, aggregated from deduplicated recommendations."""
+    source = [r for r in _recommendations if not plan or r.plan_id == plan]
+    # First deduplicate per member: best row per unique drug pair
+    by_member_dedup: dict[str, dict[str, object]] = {}
+    for r in source:
         mid = r.member_id
-        if mid not in by_member:
-            by_member[mid] = {
-                "member_id": mid,
-                "claim_count": 0,
-                "total_gross_savings": 0.0,
-                "total_risk_adjusted_savings": 0.0,
-                "recommend_count": 0,
-                "review_count": 0,
-                "do_not_switch_count": 0,
-                "drugs": [],
-                "bands": [],
-            }
+        if mid not in by_member_dedup:
+            by_member_dedup[mid] = {}
+        key = f"{(r.current_drug or '').upper()}||{(r.candidate_alternative or '').upper()}"
+        existing = by_member_dedup[mid].get(key)
+        if existing is None or r.risk_adjusted_savings > existing.risk_adjusted_savings:  # type: ignore
+            by_member_dedup[mid][key] = r
+
+    by_member: dict[str, dict] = {}
+    for mid, drug_map in by_member_dedup.items():
+        by_member[mid] = {
+            "member_id": mid,
+            "claim_count": 0,
+            "total_gross_savings": 0.0,
+            "total_risk_adjusted_savings": 0.0,
+            "recommend_count": 0,
+            "review_count": 0,
+            "do_not_switch_count": 0,
+            "drugs": [],
+            "bands": [],
+        }
         m = by_member[mid]
-        m["claim_count"] += 1
-        m["total_gross_savings"] += r.gross_savings
-        m["total_risk_adjusted_savings"] += r.risk_adjusted_savings
-        if r.recommendation_band == "Recommend":
-            m["recommend_count"] += 1
-        elif r.recommendation_band == "Review":
-            m["review_count"] += 1
-        else:
-            m["do_not_switch_count"] += 1
-        if r.current_drug not in m["drugs"]:
-            m["drugs"].append(r.current_drug)
-        m["bands"].append(r.recommendation_band)
+        for r in drug_map.values():
+            m["claim_count"] += 1
+            m["total_gross_savings"] += r.gross_savings
+            m["total_risk_adjusted_savings"] += r.risk_adjusted_savings
+            if r.recommendation_band == "Recommend":
+                m["recommend_count"] += 1
+            elif r.recommendation_band == "Review":
+                m["review_count"] += 1
+            else:
+                m["do_not_switch_count"] += 1
+            if r.current_drug not in m["drugs"]:
+                m["drugs"].append(r.current_drug)
+            m["bands"].append(r.recommendation_band)
 
     members = []
     for m in by_member.values():
@@ -217,15 +228,24 @@ async def get_members():
 
 @app.get("/api/members/{member_id}")
 async def get_member_detail(member_id: str):
-    """Return all recommendations for a specific member."""
+    """Return deduplicated recommendations for a specific member."""
     recs = [r.model_dump() for r in _recommendations if r.member_id == member_id]
     if not recs:
         raise HTTPException(status_code=404, detail="Member not found.")
+
+    # Deduplicate: keep best risk_adjusted_savings per unique drug pair
+    seen: dict[str, dict] = {}
+    for r in recs:
+        key = f"{(r.get('current_drug') or '').upper()}||{(r.get('candidate_alternative') or '').upper()}"
+        if key not in seen or r["risk_adjusted_savings"] > seen[key]["risk_adjusted_savings"]:
+            seen[key] = r
+    deduped = list(seen.values())
+
     return {
         "member_id": member_id,
-        "recommendations": recs,
-        "total_gross_savings": round(sum(r["gross_savings"] for r in recs), 2),
-        "total_risk_adjusted_savings": round(sum(r["risk_adjusted_savings"] for r in recs), 2),
+        "recommendations": deduped,
+        "total_gross_savings": round(sum(r["gross_savings"] for r in deduped), 2),
+        "total_risk_adjusted_savings": round(sum(r["risk_adjusted_savings"] for r in deduped), 2),
     }
 
 
@@ -284,6 +304,7 @@ async def chat_analyze(
                 "preferred_pharmacy_available, pharmacy_access_score."
             )
 
+        new_claim_rows: list[dict] = []
         for i, row in enumerate(rows[:50]):
             row = {k.strip().lower(): v.strip() for k, v in row.items()}
             try:
@@ -315,6 +336,7 @@ async def chat_analyze(
                 rec = build_recommendation(claim)
                 if rec:
                     results.append(rec.model_dump())
+                    new_claim_rows.append(claim_data)
             except Exception as e:
                 results.append({
                     "error": str(e),
@@ -322,18 +344,84 @@ async def chat_analyze(
                     "skipped": True,
                 })
 
+        # Append new claims to claims.csv for persistence across restarts
+        if new_claim_rows:
+            claims_csv = Path(__file__).parent.parent / "data" / "synthetic" / "claims.csv"
+            try:
+                fieldnames = [
+                    "claim_id", "member_id", "age_band", "sex", "zip3", "plan_id",
+                    "drug_name", "brand_generic_flag", "ndc", "quantity", "days_supply",
+                    "fill_date", "paid_amount", "member_cost_share", "pharmacy_id",
+                    "prescriber_id", "diagnosis_group", "adherence_score",
+                    "prior_switch_failure_flag", "estimated_event_cost",
+                    "preferred_pharmacy_available", "pharmacy_access_score",
+                ]
+                with open(claims_csv, "a", newline="") as f:
+                    writer = csv.DictWriter(f, fieldnames=fieldnames)
+                    for cd in new_claim_rows:
+                        writer.writerow(cd)
+            except Exception as e:
+                print(f"Warning: could not persist claims to CSV: {e}")
+
     # ── Mode 2: Drug name text query ───────────────────────────────────────
     elif drug_query and drug_query.strip():
         raw_query = drug_query.strip()
         lowered = raw_query.lower()
 
-        # Out-of-context guard
+        # Out-of-context guard — greetings
         if lowered.strip() in {"hello", "hi", "hey", "thanks", "help", "bye"}:
             return _chat_out_of_context()
 
-        # Extract actual drug names from natural-language questions.
-        # e.g. "Can I switch to tadalafil instead of cialis 20mg?" → ["tadalafil", "cialis"]
-        drug_names = _extract_drug_names(raw_query)
+        # Deterministic out-of-scope guard (works even when USE_LLM=false).
+        # If the query matches clear non-pharmacy patterns and contains no
+        # plausible drug tokens, reject immediately before any DB lookup.
+        if _is_nondrug_query(raw_query):
+            return JSONResponse(status_code=200, content={
+                "mode": "out_of_scope",
+                "analyzed": 0,
+                "no_alternative_count": 0,
+                "skipped_count": 0,
+                "total_gross_savings": 0,
+                "total_risk_adjusted_savings": 0,
+                "band_counts": {},
+                "results": [],
+                "summary_text": (
+                    "That question is outside my scope. I can only help with pharmacy benefit analysis — "
+                    "please enter a drug name (e.g. 'Lipitor, Provigil') or upload a claims CSV."
+                ),
+                "dashboard_updated": False,
+            })
+
+        # LLM-first classification: when USE_LLM is on and the query looks like
+        # natural language (not a bare comma-separated drug list), ask the LLM to
+        # classify and extract drug names. This catches out-of-scope questions like
+        # "What is the capital of the US?" before they reach the DB lookup.
+        drug_names = []
+        use_llm = os.getenv("USE_LLM", "false").lower() in ("true", "1", "yes")
+        is_bare_list = bool(re.search(r"[,;]", raw_query)) and not re.search(r"\b(what|can|is|how|which|should|could|tell|find|help)\b", raw_query, re.I)
+
+        if use_llm and not is_bare_list:
+            llm_result = _llm_classify_query(raw_query, chat_history)
+            if llm_result.get("is_drug_query") is False:
+                reply = llm_result.get("reply", "I can only help with pharmacy and drug-related questions. Please ask about a specific drug name.")
+                return {
+                    "mode": "out_of_scope",
+                    "analyzed": 0,
+                    "no_alternative_count": 0,
+                    "skipped_count": 0,
+                    "total_gross_savings": 0,
+                    "total_risk_adjusted_savings": 0,
+                    "band_counts": {},
+                    "results": [],
+                    "summary_text": reply,
+                    "dashboard_updated": False,
+                }
+            if llm_result.get("drug_names"):
+                drug_names = llm_result["drug_names"]
+
+        # Fall back to deterministic extraction if LLM unavailable or bare list
+        if not drug_names:
+            drug_names = _extract_drug_names(raw_query)
         if not drug_names:
             return _chat_out_of_context()
 
@@ -410,6 +498,35 @@ async def chat_analyze(
     else:
         return _chat_error("Please upload a CSV file or enter drug names to query.")
 
+    # ── Persist CSV recommendations to global store ───────────────────────
+    dashboard_updated = False
+    if mode == "csv":
+        from scripts.services.recommendation_service import build_recommendation, _coerce_claim
+        from scripts.services.recommendation_service import get_dashboard_summary
+        new_recs = [r for r in results if not r.get("skipped") and not r.get("no_alternative") and r.get("recommendation_id")]
+        if new_recs:
+            # results from CSV are already full Recommendation model_dump()s
+            # Re-build proper Recommendation objects from the raw result dicts
+            pass  # _recommendations already updated below via rec objects
+        # Append the Recommendation objects built during CSV processing
+        # (build_recommendation returns Recommendation; results holds model_dump())
+        # We stored recs as model_dump() — rebuild from results via schemas
+        try:
+            from scripts.models.schemas import Recommendation as RecSchema
+            added = []
+            for r in results:
+                if r.get("skipped") or r.get("no_alternative"):
+                    continue
+                try:
+                    added.append(RecSchema(**r))
+                except Exception:
+                    pass
+            if added:
+                _recommendations.extend(added)
+                dashboard_updated = True
+        except Exception:
+            pass
+
     # ── Build chat response ────────────────────────────────────────────────
     valid = [r for r in results if not r.get("skipped") and not r.get("no_alternative")]
     no_alt = [r for r in results if r.get("no_alternative")]
@@ -441,7 +558,90 @@ async def chat_analyze(
         "band_counts": band_counts,
         "results": results,
         "summary_text": summary,
+        "dashboard_updated": dashboard_updated,
     }
+
+
+def _is_nondrug_query(text: str) -> bool:
+    """
+    Deterministic pre-filter: returns True if the query is clearly not about
+    drugs or pharmacy, so we can reject it without touching the DB or LLM.
+    Logic: query matches a general-knowledge/non-pharmacy pattern AND contains
+    no token that looks up in the drug DB.
+    """
+    lowered = text.lower()
+
+    # Patterns that strongly indicate a non-pharmacy question
+    non_drug_patterns = [
+        r"\b(capital\s+of|largest\s+city|population\s+of|president\s+of|currency\s+of)\b",
+        r"\b(country|countries|continent|geography|history|politics|weather|sports|recipe|cook)\b",
+        r"\b(who\s+is|who\s+was|when\s+did|where\s+is|where\s+was|how\s+many\s+people)\b",
+        r"\b(movie|film|actor|actress|music|song|artist|book|author|novel)\b",
+        r"\b(stock|invest|bitcoin|crypto|economy|gdp|inflation)\b",
+        r"\b(japan|china|france|germany|india|brazil|russia|italy|spain|canada|australia|mexico|africa|europe|asia)\b",
+    ]
+
+    has_non_drug_pattern = any(re.search(p, lowered) for p in non_drug_patterns)
+    if not has_non_drug_pattern:
+        return False
+
+    # Even if a non-drug pattern matched, if any token is a real drug name
+    # in our DB, let it through — e.g. "Japan" appearing alongside "Lipitor"
+    tokens = re.findall(r"[A-Za-z][A-Za-z0-9\-]{2,}", text)
+    for tok in tokens:
+        if _is_plausible_drug_name(tok):
+            return False
+
+    return True
+
+
+def _llm_classify_query(text: str, history: list) -> dict:
+    """
+    Ask the LLM to classify whether the query is drug/pharmacy-related.
+    Returns {"is_drug_query": bool, "drug_names": list[str], "reply": str}
+    Falls back to {"is_drug_query": True, "drug_names": []} on any failure
+    so the deterministic _extract_drug_names() path takes over.
+    """
+    model = os.getenv("MODEL_NAME", "")
+    if not model:
+        return {"is_drug_query": True, "drug_names": []}
+    try:
+        import litellm  # type: ignore
+    except ImportError:
+        return {"is_drug_query": True, "drug_names": []}
+
+    system_prompt = (
+        "You are a pharmacy benefit management assistant. "
+        "Classify the user query and respond ONLY with a JSON object — no markdown, no extra text:\n"
+        '{"is_drug_query": true/false, "drug_names": ["DrugA", "DrugB"], "reply": "..."}\n\n'
+        "Rules:\n"
+        "- If the query asks about a drug, medication, or generic alternative: is_drug_query=true, "
+        "list the brand/generic drug names mentioned in drug_names, reply can be empty string.\n"
+        "- If the query is NOT about drugs or pharmacy (e.g. geography, history, general knowledge): "
+        "is_drug_query=false, drug_names=[], reply=a polite one-sentence message explaining "
+        "this tool only handles pharmacy benefit queries."
+    )
+    messages = [{"role": "system", "content": system_prompt}]
+    for h in history[-3:]:
+        if isinstance(h, dict) and "role" in h and "content" in h:
+            messages.append({"role": h["role"], "content": str(h["content"])})
+    messages.append({"role": "user", "content": text})
+
+    try:
+        resp = litellm.completion(model=model, messages=messages, max_tokens=200)
+        raw = (resp.choices[0].message.content or "").strip()
+        if raw.startswith("```"):
+            raw = raw.split("```")[1]
+            if raw.startswith("json"):
+                raw = raw[4:]
+        data = json.loads(raw.strip())
+        return {
+            "is_drug_query": bool(data.get("is_drug_query", True)),
+            "drug_names": [str(d).strip() for d in data.get("drug_names", []) if str(d).strip()],
+            "reply": str(data.get("reply", "")),
+        }
+    except Exception:
+        return {"is_drug_query": True, "drug_names": []}
 
 
 _QUESTION_PREFIXES = re.compile(

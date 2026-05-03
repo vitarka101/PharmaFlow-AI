@@ -438,7 +438,8 @@ def test_demo_csv_no_unquoted_commas_in_drug_names():
 # ── Chat API tests for natural language questions ─────────────────────────
 
 @pytest.mark.skipif(not _has_testclient, reason="httpx not installed")
-def test_chat_simple_drug_query():
+def test_chat_simple_drug_query(monkeypatch):
+    monkeypatch.setenv("USE_LLM", "false")
     from scripts.app import app
     client = TestClient(app)
     resp = client.post("/api/chat/analyze", data={"drug_query": "Provigil"})
@@ -448,8 +449,9 @@ def test_chat_simple_drug_query():
 
 
 @pytest.mark.skipif(not _has_testclient, reason="httpx not installed")
-def test_chat_alternative_question_two_drugs():
+def test_chat_alternative_question_two_drugs(monkeypatch):
     """'Can tadalafil be used as an alternative of cialis?' should extract both drugs."""
+    monkeypatch.setenv("USE_LLM", "false")
     from scripts.app import app
     client = TestClient(app)
     resp = client.post(
@@ -466,8 +468,9 @@ def test_chat_alternative_question_two_drugs():
 
 
 @pytest.mark.skipif(not _has_testclient, reason="httpx not installed")
-def test_chat_switch_to_question():
+def test_chat_switch_to_question(monkeypatch):
     """'Can I switch to metformin instead of glucophage?' should parse both drugs."""
+    monkeypatch.setenv("USE_LLM", "false")
     from scripts.app import app
     client = TestClient(app)
     resp = client.post(

@@ -7,10 +7,74 @@ let sessionAnalyzed = 0;
 let sessionFound = 0;
 
 // Session memory: unique ID + last-5 message history for LLM context
-const sessionId = (typeof crypto !== "undefined" && crypto.randomUUID)
-  ? crypto.randomUUID()
-  : Math.random().toString(36).slice(2);
-let chatHistory = [];  // [{role, content}, ...] capped at 5
+const sessionId = (() => {
+  const stored = sessionStorage.getItem("pf_session_id");
+  if (stored) return stored;
+  const id = (typeof crypto !== "undefined" && crypto.randomUUID)
+    ? crypto.randomUUID()
+    : Math.random().toString(36).slice(2);
+  sessionStorage.setItem("pf_session_id", id);
+  return id;
+})();
+let chatHistory = [];  // [{role, content}, ...] capped at 10
+
+// ── Persist & restore session state across tab navigations ────────────────
+
+function saveSessionState() {
+  // Strip any in-flight typing indicators before saving so they don't restore broken
+  const thread = document.getElementById("chat-thread");
+  const clone = thread.cloneNode(true);
+  clone.querySelectorAll('[id^="typing-"]').forEach(el => el.remove());
+  sessionStorage.setItem("pf_thread_html", clone.innerHTML);
+  sessionStorage.setItem("pf_sidebar_html", document.getElementById("session-results-list").innerHTML);
+  sessionStorage.setItem("pf_bands_html", document.getElementById("session-bands").innerHTML);
+  sessionStorage.setItem("pf_stats", JSON.stringify({
+    analyzed: sessionAnalyzed, found: sessionFound,
+    gross: sessionTotalGross, risk: sessionTotalRisk,
+    statsVisible: document.getElementById("session-stats").style.display !== "none",
+  }));
+  sessionStorage.setItem("pf_history", JSON.stringify(chatHistory));
+}
+
+function restoreSessionState() {
+  const thread = sessionStorage.getItem("pf_thread_html");
+  if (!thread) return; // nothing to restore
+
+  document.getElementById("chat-thread").innerHTML = thread;
+  document.getElementById("session-results-list").innerHTML =
+    sessionStorage.getItem("pf_sidebar_html") || "";
+  document.getElementById("session-bands").innerHTML =
+    sessionStorage.getItem("pf_bands_html") || "";
+
+  const stats = JSON.parse(sessionStorage.getItem("pf_stats") || "{}");
+  sessionAnalyzed    = stats.analyzed || 0;
+  sessionFound       = stats.found    || 0;
+  sessionTotalGross  = stats.gross    || 0;
+  sessionTotalRisk   = stats.risk     || 0;
+  if (stats.statsVisible) {
+    document.getElementById("session-empty").style.display = "none";
+    document.getElementById("session-stats").style.display = "block";
+    set("stat-analyzed", sessionAnalyzed);
+    set("stat-found",    sessionFound);
+    set("stat-gross",    fmt$(sessionTotalGross));
+    set("stat-risk",     fmt$(sessionTotalRisk));
+  }
+
+  chatHistory = JSON.parse(sessionStorage.getItem("pf_history") || "[]");
+
+  // Scroll thread to bottom
+  const t = document.getElementById("chat-thread");
+  t.scrollTop = t.scrollHeight;
+}
+
+// Restore on load
+restoreSessionState();
+
+// Save whenever user navigates away (tab switch, link click, etc.)
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "hidden") saveSessionState();
+});
+window.addEventListener("pagehide", saveSessionState);
 
 // ── File handling ─────────────────────────────────────────────────────────
 
@@ -75,7 +139,35 @@ async function sendMessage() {
     fd.append("session_id", sessionId);
     fd.append("history", JSON.stringify(chatHistory.slice(-5)));
 
-    const resp = await fetch("/api/chat/analyze", { method: "POST", body: fd });
+    // For CSV uploads: fetch immediately but animate a processing delay before rendering
+    const fetchPromise = fetch("/api/chat/analyze", { method: "POST", body: fd });
+
+    let resp;
+    if (pendingFile) {
+      const steps = [
+        "Analyzing claims…",
+        "Running agent pipeline…",
+        "Calculating risk-adjusted savings…",
+        "Preparing results…",
+      ];
+      const stepEl = document.querySelector(`#${typingId} .msg-bubble`);
+      let stepIndex = 0;
+      if (stepEl) stepEl.innerHTML = steps[0];
+      const stepInterval = setInterval(() => {
+        stepIndex++;
+        if (stepIndex < steps.length && stepEl) stepEl.innerHTML = steps[stepIndex];
+      }, 3000);
+
+      // Wait for both fetch AND 10s delay
+      [resp] = await Promise.all([
+        fetchPromise,
+        new Promise(r => setTimeout(r, 10000)),
+      ]);
+      clearInterval(stepInterval);
+    } else {
+      resp = await fetchPromise;
+    }
+
     removeTyping(typingId);
 
     if (!resp.ok) {
@@ -85,12 +177,16 @@ async function sendMessage() {
       const data = await resp.json();
       updateSessionStats(data);
       appendAnalysisResult(data);
+      if (data.dashboard_updated) {
+        appendBotMsg(`<p style="color:var(--recommend);font-weight:600">✓ Dashboard and Members pages updated — navigate there to see the new opportunities.</p>`);
+      }
       // Update local history for LLM context
       const userContent = pendingFile ? `[CSV: ${pendingFile.name}]` : drugQuery;
       chatHistory.push({ role: "user", content: userContent });
       chatHistory.push({ role: "assistant", content: data.summary_text || "" });
       if (chatHistory.length > 10) chatHistory = chatHistory.slice(-10);
     }
+    saveSessionState();
 
   } catch (e) {
     removeTyping(typingId);
@@ -173,10 +269,9 @@ function appendAnalysisResult(data) {
     const equivLabel = equiv === "GENERIC_EQUIVALENT" ? "Generic Equiv." : "Therapeutic Alt.";
     return `
       <tr>
-        <td style="max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${drug}">${drug}</td>
-        <td style="max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${alt}">${alt}</td>
+        <td style="max-width:150px;word-break:break-word" title="${drug}">${drug}</td>
+        <td style="max-width:150px;word-break:break-word" title="${alt}">${alt}</td>
         <td><span class="equiv ${equivCls}" style="font-size:11px">${equivLabel}</span></td>
-        <td style="font-size:11px;color:var(--text-muted)">${te}</td>
         <td><span class="savings-pos">${fmt$(gross)}</span></td>
         <td><span class="${riskAdj >= 0 ? 'savings-pos' : 'savings-neg'}">${fmt$(riskAdj)}</span></td>
         <td><span class="band ${bandCls}" style="font-size:11px">${band}</span></td>
@@ -184,12 +279,16 @@ function appendAnalysisResult(data) {
   }).join("");
 
   appendBotMsg(`
-    <div style="overflow-x:auto;margin-top:8px">
-      <table class="chat-result-table">
+    <div style="margin-top:8px">
+      <table class="chat-result-table" style="width:100%;table-layout:fixed">
+        <colgroup>
+          <col style="width:22%"><col style="width:22%"><col style="width:16%">
+          <col style="width:14%"><col style="width:14%"><col style="width:12%">
+        </colgroup>
         <thead>
           <tr>
             <th>Current Drug</th><th>Generic Alternative</th><th>Equivalence</th>
-            <th>TE Code</th><th>Gross Savings</th><th>Risk-Adj. Savings</th><th>Band</th>
+            <th>Gross Savings</th><th>Risk-Adj. Savings</th><th>Band</th>
           </tr>
         </thead>
         <tbody>${tableRows}</tbody>
@@ -252,6 +351,13 @@ function removeTyping(id) {
 function clearSession() {
   sessionAnalyzed = sessionFound = sessionTotalGross = sessionTotalRisk = 0;
   chatHistory = [];
+  // Clear persisted state so navigating back shows a fresh session
+  sessionStorage.removeItem("pf_thread_html");
+  sessionStorage.removeItem("pf_sidebar_html");
+  sessionStorage.removeItem("pf_bands_html");
+  sessionStorage.removeItem("pf_stats");
+  sessionStorage.removeItem("pf_history");
+  sessionStorage.removeItem("pf_session_id");
   document.getElementById("session-empty").style.display = "block";
   document.getElementById("session-stats").style.display = "none";
   document.getElementById("session-results-list").innerHTML = "";

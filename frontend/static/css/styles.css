@@ -39,7 +39,52 @@ header {
 }
 header h1 { font-size: 20px; font-weight: 600; letter-spacing: 0.3px; }
 header .subtitle { font-size: 12px; opacity: 0.7; margin-top: 2px; }
-.header-right { font-size: 12px; opacity: 0.65; text-align: right; }
+.header-right { font-size: 12px; text-align: right; display:flex; align-items:center; gap:12px; }
+
+/* ── Info / Glossary button ── */
+.info-btn {
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  font-size: 32px;
+  line-height: 1;
+  transition: transform 0.15s, filter 0.15s;
+  filter: brightness(1.1);
+}
+.info-btn:hover {
+  transform: scale(1.15);
+  filter: brightness(1.4);
+}
+
+/* ── Glossary modal ── */
+.glossary-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.glossary-item {
+  background: var(--bg);
+  border-left: 3px solid var(--accent);
+  border-radius: 0 6px 6px 0;
+  padding: 10px 14px;
+}
+.glossary-item .term {
+  font-weight: 700;
+  font-size: 13px;
+  color: var(--primary);
+  margin-bottom: 4px;
+  letter-spacing: 0.1px;
+}
+.glossary-item .defn {
+  font-size: 12.5px;
+  color: var(--text-muted);
+  line-height: 1.6;
+}
 
 /* ── Disclaimer banner ── */
 .disclaimer {
@@ -234,14 +279,14 @@ tr.expanded td { background: #f0f6ff; }
 .detail-kv .k { color: var(--text-muted); font-size: 12px; }
 .detail-kv .v { font-weight: 600; font-size: 12px; text-align: right; }
 .detail-explanation {
-  background: #fff;
-  border: 1px solid var(--border);
-  border-radius: 6px;
+  background: var(--bg);
+  border-left: 3px solid var(--accent);
+  border-radius: 0 6px 6px 0;
   padding: 12px 16px;
-  font-size: 13px;
+  font-size: 13.5px;
   color: var(--text);
-  line-height: 1.6;
-  margin-top: 4px;
+  line-height: 1.75;
+  margin-top: 6px;
 }
 
 /* ── Expand toggle ── */
@@ -314,8 +359,8 @@ tr.expanded td { background: #f0f6ff; }
 /* ── Chat layout ── */
 .chat-layout {
   display: grid;
-  grid-template-columns: 280px 1fr;
-  gap: 20px;
+  grid-template-columns: 220px 1fr;
+  gap: 16px;
   height: calc(100vh - 180px);
   min-height: 520px;
 }
@@ -415,7 +460,7 @@ tr.expanded td { background: #f0f6ff; }
   border: 1px solid var(--border);
   border-radius: 12px 12px 12px 4px;
   padding: 12px 16px;
-  max-width: 85%;
+  max-width: 96%;
   font-size: 13px;
   line-height: 1.6;
   box-shadow: 0 1px 3px rgba(0,0,0,0.06);
@@ -522,7 +567,7 @@ tr.expanded td { background: #f0f6ff; }
 }
 .chat-result-table th {
   background: #f0f4f8;
-  padding: 6px 10px;
+  padding: 5px 8px;
   text-align: left;
   font-size: 10px;
   font-weight: 700;
@@ -533,7 +578,7 @@ tr.expanded td { background: #f0f6ff; }
   white-space: nowrap;
 }
 .chat-result-table td {
-  padding: 7px 10px;
+  padding: 6px 8px;
   border-bottom: 1px solid #f0f4f8;
   vertical-align: middle;
 }

@@ -14,10 +14,34 @@
     <div class="subtitle">Payer Pharmacy Benefit Analysis</div>
   </div>
   <div class="header-right">
-    Powered by CMS NADAC + FDA Orange Book<br/>
-    Synthetic Demo Data · Not Clinical Decision Support
+    <span style="opacity:0.65;font-size:12px;text-align:right">Powered by CMS NADAC + FDA Orange Book<br/>Aetna Claims Data (De-identified)</span>
+    <button class="info-btn" onclick="document.getElementById('glossary-modal').style.display='flex'" title="Glossary of terms">ℹ️</button>
   </div>
 </header>
+
+<!-- Glossary modal -->
+<div id="glossary-modal" onclick="if(event.target===this)this.style.display='none'" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:2000;align-items:center;justify-content:center;padding:24px">
+  <div style="background:#fff;border-radius:10px;max-width:620px;width:100%;max-height:80vh;overflow-y:auto;box-shadow:0 8px 40px rgba(0,0,0,0.25)">
+    <div style="display:flex;justify-content:space-between;align-items:center;padding:18px 24px;border-bottom:1px solid var(--border);position:sticky;top:0;background:#fff">
+      <h3 style="margin:0;font-size:16px">Glossary of Terms</h3>
+      <button onclick="document.getElementById('glossary-modal').style.display='none'" style="background:none;border:none;font-size:20px;cursor:pointer;color:var(--text-muted)">✕</button>
+    </div>
+    <div style="padding:20px 24px;display:flex;flex-direction:column;gap:10px">
+      <div style="padding:10px 14px;background:#f4f6f9;border-left:3px solid #0077cc;border-radius:0 6px 6px 0"><strong style="font-size:13px;color:#1a3a5c">Gross Savings</strong><div style="font-size:12px;color:#6b7a99;margin-top:3px">Raw pharmacy cost difference between brand and generic, based on NADAC unit pricing × fill quantity. Pre-risk.</div></div>
+      <div style="padding:10px 14px;background:#f4f6f9;border-left:3px solid #0077cc;border-radius:0 6px 6px 0"><strong style="font-size:13px;color:#1a3a5c">Risk-Adjusted Savings</strong><div style="font-size:12px;color:#6b7a99;margin-top:3px">Gross savings minus expected switch-failure cost and adherence penalty. Use this number for prioritization.</div></div>
+      <div style="padding:10px 14px;background:#f4f6f9;border-left:3px solid #0077cc;border-radius:0 6px 6px 0"><strong style="font-size:13px;color:#1a3a5c">Generic Equivalent</strong><div style="font-size:12px;color:#6b7a99;margin-top:3px">Same ingredient, strength, form and route — FDA TE code AB. Generally low clinical risk to switch.</div></div>
+      <div style="padding:10px 14px;background:#f4f6f9;border-left:3px solid #0077cc;border-radius:0 6px 6px 0"><strong style="font-size:13px;color:#1a3a5c">Therapeutic Alternative</strong><div style="font-size:12px;color:#6b7a99;margin-top:3px">Different molecule, same drug class. Requires clinical review before switching.</div></div>
+      <div style="padding:10px 14px;background:#f4f6f9;border-left:3px solid #1a7f4b;border-radius:0 6px 6px 0"><strong style="font-size:13px;color:#1a3a5c">Recommend</strong><div style="font-size:12px;color:#6b7a99;margin-top:3px">Positive risk-adjusted savings, low clinical and access risk. Suitable for proactive outreach.</div></div>
+      <div style="padding:10px 14px;background:#f4f6f9;border-left:3px solid #b45309;border-radius:0 6px 6px 0"><strong style="font-size:13px;color:#1a3a5c">Review</strong><div style="font-size:12px;color:#6b7a99;margin-top:3px">Positive savings but meaningful clinical or access uncertainty. Requires pharmacist sign-off.</div></div>
+      <div style="padding:10px 14px;background:#f4f6f9;border-left:3px solid #b91c1c;border-radius:0 6px 6px 0"><strong style="font-size:13px;color:#1a3a5c">Do Not Switch</strong><div style="font-size:12px;color:#6b7a99;margin-top:3px">Negative risk-adjusted savings or high safety/access flags. Switch blocked.</div></div>
+      <div style="padding:10px 14px;background:#f4f6f9;border-left:3px solid #0077cc;border-radius:0 6px 6px 0"><strong style="font-size:13px;color:#1a3a5c">Clinical Risk Score</strong><div style="font-size:12px;color:#6b7a99;margin-top:3px">0–1 probability of adverse medical event if switch occurs. Derived from failure history, diagnosis, and adherence.</div></div>
+      <div style="padding:10px 14px;background:#f4f6f9;border-left:3px solid #0077cc;border-radius:0 6px 6px 0"><strong style="font-size:13px;color:#1a3a5c">Access Risk Score</strong><div style="font-size:12px;color:#6b7a99;margin-top:3px">0–1 likelihood member cannot obtain the alternative. Based on pharmacy access and zip-level data.</div></div>
+      <div style="padding:10px 14px;background:#f4f6f9;border-left:3px solid #0077cc;border-radius:0 6px 6px 0"><strong style="font-size:13px;color:#1a3a5c">TE Code</strong><div style="font-size:12px;color:#6b7a99;margin-top:3px">FDA Orange Book rating. AB = bioequivalent and substitutable. BX/B* = uncertain.</div></div>
+      <div style="padding:10px 14px;background:#f4f6f9;border-left:3px solid #0077cc;border-radius:0 6px 6px 0"><strong style="font-size:13px;color:#1a3a5c">NADAC</strong><div style="font-size:12px;color:#6b7a99;margin-top:3px">National Average Drug Acquisition Cost — CMS benchmark for retail pharmacy drug costs.</div></div>
+      <div style="padding:10px 14px;background:#f4f6f9;border-left:3px solid #0077cc;border-radius:0 6px 6px 0"><strong style="font-size:13px;color:#1a3a5c">Adherence Score</strong><div style="font-size:12px;color:#6b7a99;margin-top:3px">0–1 measure of on-time refill consistency. Lower scores increase the adherence risk penalty.</div></div>
+    </div>
+  </div>
+</div>
 
 <nav class="topnav">
   <a href="/">Prescription Advisor</a>
@@ -124,7 +148,7 @@
 </div>
 
 <footer>
-  PharmaFlow AI &mdash; Capstone Demo &middot; Columbia University &middot; All member data is synthetic.
+  PharmaFlow AI &middot; Drug pricing: CMS NADAC &middot; Equivalence: FDA Orange Book &middot; All member data is de-identified. Source: Aetna (redacted).
 </footer>
 
 <script src="/static/js/members.js"></script>

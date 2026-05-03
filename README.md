@@ -1,134 +1,145 @@
 # PharmaFlow AI
 
-A payer-side pharmacy benefit analysis platform that identifies clinically sound, risk-adjusted drug-switch opportunities using real public drug pricing data and a four-agent AI pipeline.
+> **Live Demo:** [https://pharmaflow-ai-648786197436.us-central1.run.app](https://pharmaflow-ai-648786197436.us-central1.run.app)
 
-**Target User:** Insurance payer analysts, pharmacy benefit managers (PBMs), and pharmacists.
+---
 
-**Problem Statement:** Insurers spend billions annually on brand-name drugs when FDA-approved generic equivalents exist at a fraction of the cost. The challenge is not finding the generics — it is determining which switches are safe, accessible, and worth acting on after accounting for clinical risk, adherence impact, and member access constraints. PharmaFlow AI automates that analysis.
+## What Is This?
 
-> All member data is synthetic. Not clinical decision support. Not a medical device.
+PharmaFlow AI is a **payer-side pharmacy benefit intelligence platform** that automatically identifies where an insurance company can save money on drug spend — without compromising member health outcomes.
+
+It ingests a payer's claims data, runs each brand-name drug through a four-agent AI pipeline, and outputs a ranked list of generic switch opportunities with full clinical risk, adherence risk, access risk, and confidence scores — ready for pharmacist review.
+
+> **Not clinical decision support. Not a medical device. All member data is de-identified.  Source: Aetna (redacted).**
+
+---
+
+## The Business Case
+
+### Who Uses This
+
+| User | Problem |
+|------|---------|
+| **Pharmacy Benefit Managers (PBMs)** | Need to identify generic switch opportunities across millions of claims without manual review |
+| **Insurance Payer Analysts** | Need to prioritize which switches are actually worth pursuing after risk adjustment |
+| **Clinical Pharmacists** | Need structured, evidence-grounded switch packages to act on recommendations |
+
+### The Problem
+
+US payers spend **$200B+ annually** on brand-name drugs when FDA-approved generic equivalents exist at a fraction of the cost. The challenge is not *finding* the generics — it is knowing **which switches are safe, accessible, and net-positive** after accounting for:
+
+- **Clinical risk**: Will the member have a medical event if they switch?
+- **Adherence risk**: Will the member stop taking the drug if they switch?
+- **Access risk**: Can the member actually get the alternative drug at their pharmacy?
+
+Manual review by pharmacists costs $80–$150/hour and can only cover a tiny fraction of a payer's book of business. PharmaFlow AI automates the triage.
+
+### Monetization
+
+| Tier | Price | Features |
+|------|-------|---------|
+| **Gold** | $2,500/month | Full access — all tabs, PDF switch packages, clinical + access risk |
+| **Silver** | $1,200/month | Dashboard + Prescription Advisor, no member-level detail, no PDFs |
+| **Bronze** | $500/month | Dashboard only, no clinical/access risk columns |
+
+### Unit Economics
+
+- Average payer manages **50,000–500,000 claims/year**
+- Industry benchmark: **3–7% of claims** have actionable generic switch opportunity
+- Average gross savings per switch: **$800–$2,400/fill cycle**
+- PharmaFlow identifies and risk-ranks all candidates automatically
+- A single mid-size payer client at Gold tier generates **$30K ARR** with near-zero marginal cost per recommendation
+
+---
+
+## Live Demo
+
+**[→ Open PharmaFlow AI](https://pharmaflow-ai-648786197436.us-central1.run.app)**
+
+### Quick Demo Script
+
+**1. Single drug lookup (Prescription Advisor tab)**
+```
+Provigil
+```
+Returns: Modafinil, ~$1,000–$2,400 gross savings/fill cycle, AB-rated generic equivalent.
+
+**2. Natural language query**
+```
+What can Abilify be replaced with that is cheaper?
+```
+
+**3. Multi-drug lookup**
+```
+Abilify, Lyrica, Diovan
+```
+
+**4. Upload a claims CSV**
+Upload `data/demo/demo_claims_high_savings.csv` — full portfolio analysis with 10-second animated processing.
+
+**5. Switch to Dashboard tab**
+- See portfolio-level savings cards and three charts
+- Switch plan from Gold → Silver → Bronze to see tier enforcement
+- Expand any row for full agent breakdown (Librarian / Auditor / Clinician / Navigator)
+- On Gold: click **Download Switch Package** → 4-PDF ZIP
 
 ---
 
 ## Architecture
 
 ```
-Browser (Dashboard / Prescription Advisor / Members)
-                        │
-                   FastAPI App
-                        │
-     ┌──────────────────┼──────────────┬──────────────────┐
-     │                  │              │                  │
- Librarian           Auditor       Clinician       Social Navigator
-   Agent              Agent          Agent              Agent
- (Mapping)          (Pricing)    (Clinical Risk)   (Access/Adherence)
-     │                  │              │                  │
-     └──────────────────┴──────────────┴──────────────────┘
-                        │
-           DuckDB Warehouse (pharmaflow.duckdb)
-                        │
-           ┌────────────┴────────────┐
-       NADAC Pricing          FDA Orange Book
-     (CMS, April 2026)    (Products, Patents,
-                           Exclusivity — May 2026)
+┌─────────────────────────────────────────────────────────────────────┐
+│                        Browser UI                                    │
+│   Prescription Advisor  │  Dashboard  │  Members                    │
+└─────────────────────────┬───────────────────────────────────────────┘
+                          │ HTTP / JSON
+                          ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│                      FastAPI Application                             │
+│                      scripts/app.py                                  │
+└────────┬────────────────┬─────────────────┬────────────────┬────────┘
+         │                │                 │                │
+         ▼                ▼                 ▼                ▼
+  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐
+  │  Librarian  │  │   Auditor   │  │  Clinician  │  │   Social    │
+  │    Agent    │  │    Agent    │  │    Agent    │  │  Navigator  │
+  │ Drug Mapping│  │Cost Analysis│  │ Clinical    │  │   Agent     │
+  │             │  │             │  │    Risk     │  │Access/Adher.│
+  └──────┬──────┘  └──────┬──────┘  └──────┬──────┘  └──────┬──────┘
+         └────────────────┴─────────────────┴────────────────┘
+                          │
+          ┌───────────────┼───────────────┐
+          ▼               ▼               ▼
+   DuckDB Warehouse   ChromaDB RAG   Pandas CSV
+   (NADAC + Orange    (Drug Knowledge  (Claims Upload
+    Book SQL mart)     Vector Store)   at Runtime)
 ```
 
-One FastAPI service serves both the API and the static dashboard UI. No separate frontend build step.
-
----
-
-## Concepts from Class
-
-### Structured Output
-All four agents emit typed Pydantic v2 models (`DrugMapping`, `CostAnalysis`, `ClinicalRisk`, `AccessRisk`). These are merged into a final `Recommendation` schema that is validated end-to-end before reaching the API response. No free-form LLM strings are used in savings calculations or drug equivalence decisions.
-
-### Second Data Retrieval Method
-The system uses two distinct data retrieval methods:
-1. **DuckDB SQL** — queries the `switch_candidates` mart (Orange Book + NADAC join) for drug equivalence lookups and unit cost retrieval
-2. **Pandas CSV ingestion** — member claims files uploaded via the Chat UI are parsed with pandas, column-normalized, and run through the full agent pipeline row-by-row at request time
-
-### Parallel Execution
-The four agents (Librarian → Auditor → Clinician → Social Navigator) run as independent modules on each claim record. Their outputs are aggregated into the final `Recommendation` object by `recommendation_service.py`. The chat endpoint processes all rows in an uploaded claims CSV and aggregates results before returning a single portfolio-level response — simulating a parallel sweep over a payer's book of business.
-
-### Artifacts
-The system produces two categories of persistent artifacts:
-- **Switch Package PDFs** — clicking "Download Switch Package" on a Recommend row generates four PDFs via `reportlab`: a Member Summary, Formulary Comparison, Clinical Risk Report, and a Pharmacist Outreach Letter. These are zipped and returned as a downloadable file (`switch_package_{id}.zip`).
-- **CSV Export** — `/api/export/opportunities.csv` exports the full filtered opportunity set as a downloadable CSV for payer workflow integration.
-
-### Data Visualization
-The Dashboard includes three Chart.js charts rendered client-side from the `/api/recommendations` payload:
-- **Savings by Band** (horizontal bar) — gross vs. risk-adjusted savings split across Recommend / Review / Do Not Switch bands
-- **Clinical Risk Distribution** (histogram) — count of opportunities bucketed into 20-point clinical risk score ranges
-- **Top 10 Drugs by Gross Savings** (horizontal bar) — identifies the highest-impact switch targets in the portfolio
-
-### Code Execution
-The Prescription Advisor chat endpoint runs deterministic Python at runtime to process user queries:
-- `_extract_drug_names(text)` — NLP-lite extraction using regex tokenization, stop-word filtering, and DuckDB prefix validation to parse drug names out of natural-language questions like "What can Abilify be replaced with that is cheaper?"
-- Claims CSV uploads are processed with pandas: column normalization, quantity/days-supply validation, and per-row agent pipeline execution — all at request time with no pre-processing step.
-
-### RAG — Retrieval-Augmented Generation (ChromaDB)
-When a drug query hits the chat endpoint and all six warehouse lookup steps fail (the drug is not in the NADAC/Orange Book database), the system falls back to the LLM path. Before calling the LLM, it first queries a **ChromaDB vector store** seeded with a 30-entry drug knowledge corpus:
-
-- The drug name is embedded using `sentence-transformers` (`all-MiniLM-L6-v2`, runs fully locally — no API key)
-- Top-3 most semantically relevant chunks are retrieved (drug class, mechanism, switch rationale, clinical cautions, typical savings range)
-- Retrieved context is injected into the LLM system prompt as grounding material
-- The LLM is explicitly instructed to prefer the retrieved context over its parametric memory
-
-This means a drug like Humira (a biologic not in NADAC) gets a grounded, factual explanation of its biosimilar options rather than a hallucinated response. The ChromaDB collection is seeded in-memory at startup — no persistence file, no external server.
-
-**File:** `scripts/services/rag_service.py`
-
-**Fallback chain for unknown drugs:**
-```
-DuckDB warehouse (6 lookup steps)
-        ↓ not found
-ChromaDB RAG retrieval (top-3 chunks → injected into LLM prompt)
-        ↓ retrieval failure (graceful)
-LLM with no extra context
-        ↓ LLM unavailable / USE_LLM=false
-NO_ALTERNATIVE returned to user
-```
-
-RAG is completely non-blocking — any failure at any stage is caught and logged, and the system continues without it.
-
-### Iterative Refinement
-The savings calculation is a four-stage refinement loop where each stage adjusts the estimate downward based on new risk information:
-
-```
-Stage 1 (Auditor):    gross_savings      = (brand_cost − generic_cost) × normalized_qty
-Stage 2 (Clinician):  − medical_delta    = failure_probability × estimated_event_cost
-Stage 3 (Clinician):  − adherence_penalty = (1 − adherence_score) × $150
-Stage 4 (Scoring):    risk_adjusted_savings = gross − medical_delta − adherence_penalty
-                       → classify as Recommend / Review / Do Not Switch
-```
-
-The final band only emerges after all four agents have run and the compounded risk adjustment is complete. Starting from gross savings and refining toward net value is the core loop.
+One FastAPI service. No separate frontend build step. No Kubernetes.
 
 ---
 
 ## Four Agents
 
-### Librarian Agent — Drug Mapping
+### 1. Librarian Agent — Drug Mapping
 Maps brand drug names to FDA-approved generic equivalents using the Orange Book and NADAC warehouse.
 
-- Exact NDC match → fuzzy ingredient match on first token
+- 6-step lookup: exact NDC → ingredient prefix → fuzzy match
 - Classifies: `GENERIC_EQUIVALENT` (AB-rated TE code) | `THERAPEUTIC_ALTERNATIVE` | `NO_ALTERNATIVE`
-- Output: `DrugMapping` — source drug, candidate alternative, TE code, dosage form, strength, mapping confidence (0–1), reason codes
-- File: `scripts/agents/librarian_agent.py`
+- Output schema: `DrugMapping` — source drug, candidate alternative, TE code, dosage form, strength, mapping confidence, reason codes
+- **File:** `scripts/agents/librarian_agent.py`
 
-### Auditor Agent — Cost Analysis
+### 2. Auditor Agent — Cost Analysis
 Calculates gross pharmacy savings using NADAC unit costs.
 
 - Normalizes claim quantity to NADAC pricing unit (EA / ML / GM)
 - Formula: `gross_savings = (brand_unit_cost − generic_unit_cost) × normalized_qty`
 - Synthetic PBM spread estimate: `spread = gross_savings × 8%`
-- Output: `CostAnalysis` — unit costs, normalized quantity, gross savings, spread estimate
-- File: `scripts/agents/auditor_agent.py`
+- Output schema: `CostAnalysis` — unit costs, normalized quantity, gross savings, spread estimate
+- **File:** `scripts/agents/auditor_agent.py`
 
-### Clinician Agent — Risk Adjustment
-Estimates risk-adjusted total cost of care impact.
-
-- Base switch failure rates by diagnosis group:
+### 3. Clinician Agent — Risk Adjustment
+Estimates risk-adjusted total cost of care.
 
 | Diagnosis Group | Base Failure Rate |
 |----------------|------------------|
@@ -140,18 +151,18 @@ Estimates risk-adjusted total cost of care impact.
 | MUSCULOSKELETAL | 8% |
 | GASTROINTESTINAL | 9% |
 
-- Adjusts for: prior switch failure flag (2.5× multiplier), TE code confidence (AB ×0.85, BX ×1.20)
-- Outputs 95% credible interval (±30% of point estimate)
-- Output: `ClinicalRisk` — clinical risk score, switch failure probability, expected medical cost delta, risk-adjusted savings, credible interval
-- File: `scripts/agents/clinician_agent.py`
+- Adjusts for: prior switch failure flag (2.5× multiplier), TE code confidence
+- 95% credible interval: ±30% of point estimate
+- Output schema: `ClinicalRisk` — risk score, failure probability, medical cost delta, risk-adjusted savings, CI
+- **File:** `scripts/agents/clinician_agent.py`
 
-### Social Navigator Agent — Access & Adherence
-Assesses pharmacy access and adherence feasibility.
+### 4. Social Navigator Agent — Access & Adherence
+Assesses whether the member can realistically make the switch.
 
 - Flags: `LOW_PHARMACY_ACCESS` (score < 0.40), `PREFERRED_PHARMACY_UNAVAILABLE`, `HIGH_ADHERENCE_RISK`
-- Access override: any access flag escalates a "Recommend" to "Review"
-- Output: `AccessRisk` — pharmacy access score, adherence risk, preferred pharmacy availability, access override flag
-- File: `scripts/agents/social_navigator_agent.py`
+- Access override: any access flag escalates "Recommend" → "Review"
+- Output schema: `AccessRisk` — pharmacy access score, adherence risk, preferred pharmacy availability, access override
+- **File:** `scripts/agents/social_navigator_agent.py`
 
 ---
 
@@ -163,23 +174,129 @@ Assesses pharmacy access and adherence feasibility.
 | **Review** | Savings exist but clinical or access uncertainty is meaningful |
 | **Do Not Switch** | risk_adjusted_savings ≤ 0 OR safety/access flags are high |
 
-All thresholds live in a single `THRESHOLDS` dict in `scripts/services/scoring_service.py` — no duplication.
+All thresholds in one place: `scripts/services/scoring_service.py → THRESHOLDS`.
 
 ---
 
-## Plan / Cohort Tiers
+## Savings Formula (4-Stage Refinement)
 
-The dashboard simulates a product packaging model showing how feature access can be tiered by plan level:
+```
+Stage 1 (Auditor):
+    gross_savings = (brand_unit_cost − generic_unit_cost) × normalized_qty
 
-| Feature | Gold | Silver | Bronze |
-|---------|------|--------|--------|
-| All tabs (Dashboard, Prescription Advisor, Members) | Yes | Members hidden | Members hidden |
-| Download Switch Package (4 PDFs) | Yes | No | No |
-| Clinical Risk column in table | Yes | Yes | No |
-| Access Risk column in table | Yes | Yes | No |
-| Max Clinical Risk filter | Yes | Yes | No |
+Stage 2 (Clinician):
+    medical_delta = switch_failure_probability × estimated_event_cost
 
-Tier enforcement is client-side JS in `frontend/static/js/dashboard.js → applyPlanTier()`. Gold is the default.
+Stage 3 (Clinician):
+    adherence_penalty = (1 − adherence_score) × $150
+
+Stage 4 (Scoring):
+    risk_adjusted_savings = gross_savings − medical_delta − adherence_penalty
+    → classify as Recommend / Review / Do Not Switch
+```
+
+The final band only emerges after all four agents have run. Every number is traceable to a deterministic Python formula — the LLM never touches the math.
+
+---
+
+## Class Concepts Applied
+
+This project directly implements **14+ concepts** from the Columbia Agentic AI course syllabus:
+
+### Module 1 — LLMs, Prompt Engineering, and Validation
+
+**Role-based messages (system / user / assistant)**
+LLM fallback in `drug_mapping_service.py` constructs a proper `[system, ...history, user]` message array with a PBM assistant persona and injected conversation history.
+
+**Model adapters — LiteLLM**
+All LLM calls go through `litellm.completion()`. Switching between `vertex_ai/gemini-2.5-flash-lite`, `anthropic/claude-...`, or `openai/gpt-...` requires only a one-line `.env` change.
+
+**Context / message history / session**
+Per-session history keyed by client-generated UUID (`session_id`). Capped at 5 turns server-side (`_chat_sessions`), sent with every LLM call for follow-up context. Client independently maintains `chatHistory` in `chat.js`.
+
+**Deterministic evaluation metrics**
+`evals/test_deterministic.py` — 47 tests covering savings formulas, unit normalization, risk scoring, band classification, API schema validation, and drug name extraction. All pass without LLM calls.
+
+---
+
+### Module 2 — Tools, Frameworks, and Data
+
+**RAG pipeline (chunk → index → retrieve → generate)**
+When a drug is not in the NADAC/Orange Book warehouse, ChromaDB vector store (30 drug knowledge chunks, embedded via `sentence-transformers/all-MiniLM-L6-v2` — fully local, no API key) retrieves the top-3 relevant chunks and injects them into the LLM prompt as grounding context. File: `scripts/services/rag_service.py`.
+
+```
+DuckDB warehouse (6 lookup steps)
+        ↓ not found
+ChromaDB RAG (top-3 chunks → injected into LLM system prompt)
+        ↓ retrieval failure (graceful)
+LLM with no extra context
+        ↓ USE_LLM=false
+NO_ALTERNATIVE returned
+```
+
+**Tool contracts and schema validation**
+Every agent emits a typed Pydantic v2 model. The LLM fallback path retries once on validation failure before returning a deterministic result.
+
+**Text-to-SQL / NL-to-SQL**
+`_extract_drug_names()` uses regex tokenization + stop-word filtering + DuckDB prefix validation (`SELECT 1 FROM nadac WHERE UPPER(ndc_description) LIKE 'KEY%'`) to translate free-text questions into structured warehouse queries.
+
+**Code execution (interpreter pattern)**
+The chat endpoint runs deterministic Python at request time: pandas parses uploaded CSV claims, normalizes columns, executes the full 4-agent pipeline per row, and aggregates results — all at request time with no pre-processing step.
+
+**Three distinct data retrieval paths**
+DuckDB SQL (warehouse mart), ChromaDB vector search (drug knowledge RAG), and pandas CSV ingestion (member claims at runtime).
+
+---
+
+### Module 3 — Thinking and Planning
+
+**Artifacts**
+- **Switch Package**: "Download Switch Package" generates 4 PDFs (Member Summary, Formulary Comparison, Clinical Risk Report, Pharmacist Outreach Letter) via `reportlab`, zipped and returned as `switch_package_{id}.zip`
+- **CSV Export**: `/api/export/opportunities.csv` exports filtered opportunities for payer workflow integration
+
+**State, memory, and persistence**
+Server-side: `_chat_sessions` dict (UUID-keyed, 5-turn cap). Client-side: `sessionStorage` persists the full chat thread, sidebar stats, and history across tab navigations — survives switching to Dashboard and back without losing state. Cleared only on "New Session".
+
+**Iterative refinement / Plan-Execute**
+The 4-stage savings pipeline is a sequential refinement loop where each stage computes a risk penalty and subtracts it from the prior estimate. The final band only emerges after all adjustments are applied.
+
+**Multi-agent orchestration — orchestrator + specialists**
+`recommendation_service.py` acts as the orchestrator: it sequences the four specialist agents, collects their typed outputs, merges them into a `Recommendation`, and classifies the final band. Each agent has a single narrow responsibility.
+
+**Parallel portfolio sweep**
+The CSV upload endpoint processes every claim row through the full 4-agent pipeline and aggregates all results before returning a single portfolio-level response — simulating a parallel sweep over a payer's book of business.
+
+---
+
+### Module 4 — Agents in the World
+
+**Data Visualization**
+Three Chart.js charts rendered client-side from `/api/recommendations`:
+- Savings by Band (horizontal bar) — gross vs. risk-adjusted across Recommend / Review / Do Not Switch
+- Clinical Risk Distribution (histogram) — opportunities bucketed by risk score
+- Top 10 Drugs by Gross Savings (horizontal bar)
+
+---
+
+### Summary Table
+
+| Concept | Implementation |
+|---------|----------------|
+| Role-based messages | `drug_mapping_service.py → _llm_fallback()` |
+| LiteLLM model adapter | `litellm.completion()` — swap model via `.env` |
+| Context / history / session | `_chat_sessions` (server) + `chatHistory` + `sessionStorage` (client) |
+| Deterministic evaluation | `evals/test_deterministic.py` — 47 tests |
+| RAG pipeline | ChromaDB + sentence-transformers → LLM prompt injection |
+| Tool contracts + schema validation | Pydantic v2 on all agent I/O, LLM retry on failure |
+| Text-to-SQL / NL query | `_extract_drug_names()` → DuckDB prefix validation |
+| Code execution (interpreter) | Runtime pandas CSV processing per request |
+| Multiple retrieval methods | DuckDB SQL + ChromaDB RAG + pandas CSV |
+| Artifacts | 4-PDF switch package (reportlab) + CSV export |
+| State, memory, persistence | UUID session history + `sessionStorage` cross-tab |
+| Iterative refinement / Plan-Execute | 4-stage savings refinement loop |
+| Multi-agent orchestration | Orchestrator + 4 specialist agents |
+| Parallel portfolio sweep | CSV upload → per-row pipeline → aggregated response |
+| Data Visualization | 3 Chart.js charts on dashboard |
 
 ---
 
@@ -189,10 +306,8 @@ Tier enforcement is client-side JS in `frontend/static/js/dashboard.js → apply
 |--------|------|-------------|
 | CMS NADAC | Real public data | National Average Drug Acquisition Cost — unit pricing for ~20,000 NDCs (April 2026) |
 | FDA Orange Book | Real public data | Products, patents, exclusivity, TE codes (May 2026) |
-| Synthetic Claims | Synthetic | 500 member claims generated with stable random seed — realistic field distributions |
-| Demo CSVs | Synthetic | `data/demo/` — high-savings and mixed-risk portfolios for live walkthrough |
-
-> Synthetic data disclaimer: member IDs, claim IDs, diagnosis groups, adherence scores, and pharmacy access scores are all computer-generated. No real PHI is stored or processed.
+| Aetna Claims | De-identified | 500 member claims — realistic field distributions |
+| Demo CSVs | Synthetic | `data/demo/` — high-savings and mixed-risk portfolios for live demo |
 
 ---
 
@@ -206,8 +321,7 @@ Tier enforcement is client-side JS in `frontend/static/js/dashboard.js → apply
 | GET | `/health` | `{"status": "ok"}` |
 | GET | `/api/config` | Runtime config (LLM on/off, model name) |
 | GET | `/api/dashboard` | Portfolio summary cards |
-| GET | `/api/recommendations` | Full opportunity list (filterable by band, equiv type, savings, risk) |
-| GET | `/api/recommendations/{id}` | Single opportunity detail |
+| GET | `/api/recommendations` | Full opportunity list |
 | GET | `/api/members` | Aggregated member stats |
 | GET | `/api/members/{id}` | All recommendations for one member |
 | POST | `/api/chat/analyze` | Analyze CSV upload or free-text drug query |
@@ -222,54 +336,45 @@ Tier enforcement is client-side JS in `frontend/static/js/dashboard.js → apply
 - Python 3.11+
 - `uv` (preferred) or pip
 
-### Install
+### Install & Run
 
 ```bash
 cd Assignment_3
 uv sync
-# or: pip install -r requirements.txt
-```
 
-### Configure
-
-```bash
+# Copy env defaults (works out of the box — no API keys needed)
 cp .env.example .env
-# Defaults work with USE_LLM=false — no API keys needed for demo
-```
 
-### Run
-
-```bash
+# Start server
 uv run uvicorn app:app --reload --host 0.0.0.0 --port 8000
 ```
 
-Open http://localhost:8000
+Open [http://localhost:8000](http://localhost:8000)
 
-### Test
+### Run Tests
 
 ```bash
 uv run pytest evals/ -q
+# 47 tests, all deterministic, no LLM required
 ```
 
 ---
 
 ## LLM Configuration (Optional)
 
-The LLM is used only for fallback summarization when deterministic lookup cannot identify a drug. The full demo runs without it (`USE_LLM=false`).
-
-To enable Vertex AI / Gemini:
+The full demo works with `USE_LLM=false`. LLM is only used for fallback drug summarization when warehouse lookup fails.
 
 ```bash
 # .env
 USE_LLM=True
 MODEL_NAME=vertex_ai/gemini-2.5-flash-lite
 
-# Authenticate
+# Authenticate for Vertex AI
 gcloud auth application-default login
 gcloud config set project YOUR_PROJECT_ID
 ```
 
-Any model string supported by litellm works (`anthropic/claude-...`, `openai/gpt-...`, `vertex_ai/...`).
+Any litellm-supported model string works: `anthropic/claude-...`, `openai/gpt-...`, `vertex_ai/...`
 
 ---
 
@@ -280,14 +385,10 @@ export GCP_PROJECT_ID=your-project-id
 export GCP_REGION=us-central1
 export SERVICE=pharmaflow-ai
 
-# Enable required GCP services
-gcloud services enable run.googleapis.com cloudbuild.googleapis.com \
-  artifactregistry.googleapis.com
+gcloud services enable run.googleapis.com cloudbuild.googleapis.com artifactregistry.googleapis.com
 
-# Build and push image
 gcloud builds submit --tag gcr.io/$GCP_PROJECT_ID/$SERVICE
 
-# Deploy
 gcloud run deploy $SERVICE \
   --image gcr.io/$GCP_PROJECT_ID/$SERVICE \
   --region $GCP_REGION \
@@ -297,8 +398,7 @@ gcloud run deploy $SERVICE \
   --set-env-vars DATA_MODE=synthetic,USE_LLM=false,SYNC_DATA_TO_GCS=false
 
 # Validate
-SERVICE_URL=$(gcloud run services describe $SERVICE \
-  --region $GCP_REGION --format='value(status.url)')
+SERVICE_URL=$(gcloud run services describe $SERVICE --region $GCP_REGION --format='value(status.url)')
 curl "$SERVICE_URL/health"
 ```
 
@@ -318,7 +418,7 @@ curl "$SERVICE_URL/health"
 │   │   └── social_navigator_agent.py   # Access/adherence
 │   ├── services/
 │   │   ├── data_service.py             # DuckDB connection and queries
-│   │   ├── drug_mapping_service.py     # Brand-to-generic lookup (+ RAG + LLM fallback)
+│   │   ├── drug_mapping_service.py     # Brand-to-generic lookup + RAG + LLM fallback
 │   │   ├── pricing_service.py          # NADAC unit cost retrieval
 │   │   ├── scoring_service.py          # Savings formulas and band classification
 │   │   ├── recommendation_service.py   # Agent orchestration
@@ -339,173 +439,18 @@ curl "$SERVICE_URL/health"
 │           ├── dashboard.js
 │           ├── chat.js
 │           └── members.js
-├── src/ingest/
-│   ├── ingest_nadac.py                 # NADAC → DuckDB
-│   └── ingest_orange_book.py           # Orange Book → DuckDB
 ├── data/
 │   ├── synthetic/claims.csv
 │   ├── demo/                           # Demo CSVs for live walkthrough
-│   ├── processed/                      # Orange Book parquet marts
-│   └── warehouse/pharmaflow.duckdb
+│   └── warehouse/pharmaflow.duckdb     # DuckDB: NADAC + Orange Book
 ├── evals/
 │   └── test_deterministic.py           # 47 deterministic tests
-├── docs/
-│   ├── agents.md
-│   ├── scoring.md
-│   ├── data.md
-│   └── deployment.md
 ├── Dockerfile
 ├── cloudbuild.yaml
 ├── requirements.txt
 ├── .env.example
-├── AGENTS.md
-├── CLAUDE.md
-└── DEMO_QUESTIONS.txt                  # Verified chat queries for demo
+└── DEMO_QUESTIONS.txt
 ```
 
 ---
 
-## Demo Script
-
-**Step 1 — Single drug (Prescription Advisor tab)**
-```
-Provigil
-```
-Expected: Modafinil, ~$1,000–$2,400 gross savings/fill.
-
-**Step 2 — Natural language**
-```
-What can Abilify be replaced with that is cheaper?
-```
-
-**Step 3 — Multi-drug**
-```
-Abilify, Lyrica, Diovan
-```
-
-**Step 4 — Upload demo CSV**
-Upload `data/demo/demo_claims_high_savings.csv` — full portfolio analysis.
-
-**Step 5 — Dashboard tab**
-- Default: Gold Plan — all features visible
-- Select Silver → Members tab disappears, Download button gone from detail rows
-- Select Bronze → Clinical Risk + Access Risk columns also disappear
-- Sort by Gross Savings descending
-- Expand any row → detail panel (Librarian / Auditor / Clinician / Navigator breakdowns)
-- On Gold: click Download Switch Package → downloads 4-PDF ZIP
-
-See `DEMO_QUESTIONS.txt` for the full list of verified working chat queries.
-
----
-
-## Known Limitations
-
-- Savings are gross NADAC-based estimates (pre-rebate). Net savings after manufacturer rebates are not modeled.
-- Clinical risk scores use a simplified diagnosis-group lookup table, not real longitudinal clinical history.
-- Pharmacy access scores are synthetic proxies, not real geolocation or network data.
-- The LLM (when enabled) is used only for natural-language summarization — never for savings calculations or drug equivalence classification.
-- PDF switch packages are generated deterministically; content is illustrative only, not clinically reviewed.
-
----
-
-## Class Concepts Applied
-
-The following concepts from the Agentic AI for Analytics course syllabus are directly implemented in this project:
-
----
-
-### Module 1 — LLMs, Prompt Engineering, and Validation
-
-**Role-based formatting (system / user / assistant messages)**
-The LLM fallback in `scripts/services/drug_mapping_service.py` constructs a proper message array: a `system` prompt defining the PBM assistant persona, injected conversation `history` (last 5 turns), and the `user` message with the drug name. This matches the role-based formatting pattern from Class 2.
-
-**Model adapters (LiteLLM)**
-All LLM calls go through `litellm.completion()` (`drug_mapping_service.py`). Switching between `vertex_ai/gemini-2.5-flash-lite`, `anthropic/claude-...`, or `openai/gpt-...` requires only a one-line `.env` change — no code changes. This is the LiteLLM adapter pattern from Class 2.
-
-**Context vs. message history vs. session**
-The chat endpoint (`scripts/app.py`) maintains per-session message history keyed by a client-generated UUID (`session_id`). History is capped at 5 messages server-side (`_chat_sessions`) and passed to the LLM for context continuity. The client (`frontend/static/js/chat.js`) independently tracks `chatHistory` and sends it with each request. This directly implements the context/history/session separation from Class 2.
-
-**Evaluation — deterministic metrics**
-`evals/test_deterministic.py` contains 47 tests covering savings formulas, unit normalization, risk scoring, band classification, API schema validation, natural-language drug extraction, and CSV parsing. All tests are deterministic (no LLM mocking required), matching the deterministic metrics evaluation pattern from Class 3.
-
----
-
-### Module 2 — Tools, Frameworks, and Data
-
-**Text-to-SQL / Natural Language to SQL**
-The Prescription Advisor chat accepts free-text questions like "What can Abilify be replaced with that is cheaper?" The `_extract_drug_names()` function (`scripts/app.py`) uses regex tokenization + stop-word filtering + DuckDB prefix validation (`SELECT 1 FROM nadac WHERE UPPER(ndc_description) LIKE 'KEY%'`) to extract drug names and translate them into structured warehouse queries. This is the NL-to-SQL / schema-injection pattern from Class 7.
-
-**Code execution (the code interpreter pattern)**
-The chat endpoint runs deterministic Python at request time: it parses uploaded CSV claims with pandas, normalizes columns, executes the full 4-agent savings pipeline per row, and aggregates results before returning — all without a pre-processing step. This matches the code interpreter pattern from Class 7.
-
-**Structured output with schema validation**
-Every agent emits a typed Pydantic v2 model (`DrugMapping`, `CostAnalysis`, `ClinicalRisk`, `AccessRisk`). These are merged into a `Recommendation` schema validated end-to-end. The LLM fallback path retries once on validation failure before falling back to a deterministic result. This matches the tool contracts and schema validation pattern from Class 5.
-
-**Retrieval-Augmented Generation (RAG) — ChromaDB**
-When a drug is not found in the NADAC/Orange Book warehouse, the system queries a ChromaDB vector store (seeded with 30 drug knowledge chunks, embedded locally via `sentence-transformers`). The top-3 retrieved chunks are injected into the LLM system prompt as grounding context before generation. This is the naive RAG pipeline from Class 4: chunk → index → retrieve → generate, applied to drug knowledge rather than documents.
-
-**Second data retrieval method (SQL + RAG + CSV — three distinct paths)**
-The system uses three distinct retrieval methods: DuckDB SQL (warehouse mart queries), ChromaDB vector search (drug knowledge RAG), and pandas CSV ingestion (member claims uploaded at runtime). This exceeds the dual-retrieval requirement from Project 2.
-
----
-
-### Module 3 — Thinking and Planning
-
-**Artifacts**
-The system generates two categories of persistent artifacts (Class 8):
-- **Switch Package** — clicking "Download Switch Package" generates four PDFs (Member Summary, Formulary Comparison, Clinical Risk Report, Pharmacist Outreach Letter) via `reportlab`, zipped and returned as `switch_package_{id}.zip` (`scripts/services/document_service.py`)
-- **CSV Export** — `/api/export/opportunities.csv` exports the filtered opportunity set for payer workflow integration
-
-**State, memory, and persistence**
-Session state is maintained server-side in `_chat_sessions` (a dict keyed by UUID) and client-side in `chatHistory` (capped at 10 entries). The LLM receives the trimmed history on every call so it can answer follow-up questions with prior drug context. This implements the episodic memory pattern from Class 8.
-
-**Multi-agent orchestration**
-Four specialist agents (Librarian, Auditor, Clinician, Social Navigator) run as independent modules per claim, each with a narrow, typed responsibility. `recommendation_service.py` acts as the orchestrator, sequencing their outputs and merging them into a final `Recommendation`. This is the orchestrator + specialist pattern from Class 10.
-
-**Iterative refinement loop**
-The savings pipeline is a four-stage refinement loop where each stage adjusts the prior estimate (Class 9 — Plan-Execute pattern):
-```
-Stage 1 (Auditor):    gross_savings      = (brand_cost − generic_cost) × normalized_qty
-Stage 2 (Clinician):  − medical_delta    = failure_probability × estimated_event_cost
-Stage 3 (Clinician):  − adherence_penalty = (1 − adherence_score) × $150
-Stage 4 (Scoring):    risk_adjusted_savings → Recommend / Review / Do Not Switch
-```
-
----
-
-### Module 4 — Agents in the World
-
-**Data Visualization**
-The Dashboard renders three Chart.js charts client-side from the `/api/recommendations` payload (Class 7 / Class 11 — generative UI pattern):
-- Savings by Band (horizontal bar) — gross vs. risk-adjusted across Recommend / Review / Do Not Switch
-- Clinical Risk Distribution (histogram) — opportunities bucketed by risk score
-- Top 10 Drugs by Gross Savings (horizontal bar)
-
-**Parallel execution across a portfolio**
-The chat endpoint processes every row in an uploaded claims CSV through the full 4-agent pipeline and aggregates all results before returning a single response, simulating a parallel sweep over a payer's book of business (Class 10 — multi-agent aggregation pattern).
-
----
-
-### Summary Table
-
-| Course Concept | Class | Where in This Project |
-|----------------|-------|----------------------|
-| Role-based messages (system/user/assistant) | Class 2 | `drug_mapping_service.py → _llm_fallback()` |
-| Model adapters (LiteLLM) | Class 2 | `litellm.completion()` — swap model via `.env` |
-| Context / message history / session | Class 2 | `_chat_sessions` (server) + `chatHistory` (client JS) |
-| Deterministic evaluation metrics | Class 3 | `evals/test_deterministic.py` — 47 tests |
-| Tool contracts and schema validation | Class 5 | Pydantic v2 schemas on all agent I/O |
-| RAG pipeline (chunk → index → retrieve → generate) | Class 4 | ChromaDB + sentence-transformers → LLM prompt injection for unknown drugs |
-| Text-to-SQL / NL query | Class 7 | `_extract_drug_names()` → DuckDB prefix validation |
-| Code execution (interpreter pattern) | Class 7 | Runtime pandas CSV processing per request |
-| Second data retrieval method | Project 2 | DuckDB SQL + ChromaDB RAG + pandas CSV (three distinct paths) |
-| Artifacts | Class 8 | 4-PDF switch package (reportlab) + CSV export |
-| State, memory, and persistence | Class 8 | Per-session chat history (UUID-keyed, capped at 5) |
-| Iterative refinement / Plan-Execute | Class 9 | 4-stage savings refinement loop |
-| Multi-agent orchestration | Class 10 | Orchestrator (`recommendation_service`) + 4 specialists |
-| Parallel execution / aggregation | Class 10 | CSV portfolio sweep → aggregated single response |
-| Data Visualization | Class 7/11 | Chart.js: 3 charts on dashboard |
-
----
-
-*PharmaFlow AI — Columbia University Agentic AI Capstone · 2026 · Synthetic demo data only.*

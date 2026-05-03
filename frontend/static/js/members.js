@@ -5,7 +5,8 @@ let memberSortCol = "total_risk_adjusted_savings";
 let memberSortDir = -1;
 
 async function init() {
-  const members = await fetch("/api/members").then(r => r.json());
+  const plan = sessionStorage.getItem("pf_plan") || "PLAN-GOLD-001";
+  const members = await fetch(`/api/members?plan=${encodeURIComponent(plan)}`).then(r => r.json());
   allMembers = members;
   renderSummaryCards(members);
   renderMembersTable(members);
