@@ -81,36 +81,47 @@
     </table>
   </div>
 
-  <!-- Member detail panel (shown when a member is selected) -->
-  <div id="member-detail-panel" style="display:none">
-    <div class="table-wrap">
-      <div class="table-header">
-        <h2 id="detail-member-title">Member Detail</h2>
-        <div style="display:flex;gap:12px;align-items:center">
-          <div id="detail-summary-inline" style="font-size:13px;color:var(--text-muted)"></div>
-          <button onclick="closeDetail()" style="padding:5px 12px;border:1px solid var(--border);border-radius:5px;cursor:pointer;font-size:12px">✕ Close</button>
-        </div>
+</main>
+
+<!-- Member detail modal -->
+<div id="member-modal-overlay" onclick="if(event.target===this)closeDetail()" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:1000;align-items:flex-start;justify-content:center;overflow-y:auto;padding:32px 16px">
+  <div id="member-modal" style="background:#fff;border-radius:10px;max-width:1200px;width:90vw;margin:auto;box-shadow:0 8px 40px rgba(0,0,0,0.25)">
+    <div style="display:flex;justify-content:space-between;align-items:center;padding:20px 24px;border-bottom:1px solid var(--border)">
+      <div>
+        <h2 id="detail-member-title" style="margin:0;font-size:18px">Member Detail</h2>
+        <div id="detail-summary-inline" style="font-size:13px;color:var(--text-muted);margin-top:4px"></div>
       </div>
-      <table>
+      <button onclick="closeDetail()" style="background:none;border:none;font-size:22px;cursor:pointer;color:var(--text-muted);line-height:1;padding:4px 8px" title="Close">✕</button>
+    </div>
+    <div style="padding:16px 24px 24px">
+      <table style="width:100%;border-collapse:collapse;table-layout:fixed">
+        <colgroup>
+          <col style="width:36px">
+          <col style="width:22%">
+          <col style="width:22%">
+          <col style="width:11%">
+          <col style="width:11%">
+          <col style="width:11%">
+          <col style="width:10%">
+          <col style="width:13%">
+        </colgroup>
         <thead>
           <tr>
-            <th style="width:32px"></th>
-            <th>Current Drug</th>
-            <th>Generic Alternative</th>
-            <th>Equivalence</th>
-            <th>Gross Savings</th>
-            <th>Risk-Adj. Savings</th>
-            <th>Clinical Risk</th>
-            <th>Band</th>
+            <th style="padding:8px 4px;text-align:left;border-bottom:2px solid var(--border)"></th>
+            <th style="padding:8px;text-align:left;border-bottom:2px solid var(--border)">Current Drug</th>
+            <th style="padding:8px;text-align:left;border-bottom:2px solid var(--border)">Generic Alternative</th>
+            <th style="padding:8px;text-align:left;border-bottom:2px solid var(--border)">Equivalence</th>
+            <th style="padding:8px;text-align:left;border-bottom:2px solid var(--border)">Gross Savings</th>
+            <th style="padding:8px;text-align:left;border-bottom:2px solid var(--border)">Risk-Adj.</th>
+            <th style="padding:8px;text-align:left;border-bottom:2px solid var(--border)">Clin. Risk</th>
+            <th style="padding:8px;text-align:left;border-bottom:2px solid var(--border)">Band</th>
           </tr>
         </thead>
-        <tbody id="detail-tbody">
-        </tbody>
+        <tbody id="detail-tbody"></tbody>
       </table>
     </div>
   </div>
-
-</main>
+</div>
 
 <footer>
   PharmaFlow AI &mdash; Capstone Demo &middot; Columbia University &middot; All member data is synthetic.

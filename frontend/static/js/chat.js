@@ -32,6 +32,8 @@ function setFile(f) {
   document.getElementById("file-ready").textContent = `✓ ${f.name} ready`;
   document.getElementById("file-ready").style.display = "inline";
   document.getElementById("upload-label").style.display = "none";
+  const cancel = document.getElementById("file-cancel");
+  if (cancel) cancel.style.display = "inline";
 }
 
 function clearFile() {
@@ -39,6 +41,8 @@ function clearFile() {
   document.getElementById("file-ready").style.display = "none";
   document.getElementById("upload-label").style.display = "inline";
   document.getElementById("file-input").value = "";
+  const cancel = document.getElementById("file-cancel");
+  if (cancel) cancel.style.display = "none";
 }
 
 // ── Send message ──────────────────────────────────────────────────────────
@@ -77,23 +81,22 @@ async function sendMessage() {
     if (!resp.ok) {
       const err = await resp.json();
       appendBotMsg(`<span style="color:var(--do-not-switch)">⚠ ${err.error || "Analysis failed."}</span>`);
-      return;
+    } else {
+      const data = await resp.json();
+      updateSessionStats(data);
+      appendAnalysisResult(data);
+      // Update local history for LLM context
+      const userContent = pendingFile ? `[CSV: ${pendingFile.name}]` : drugQuery;
+      chatHistory.push({ role: "user", content: userContent });
+      chatHistory.push({ role: "assistant", content: data.summary_text || "" });
+      if (chatHistory.length > 10) chatHistory = chatHistory.slice(-10);
     }
-
-    const data = await resp.json();
-    updateSessionStats(data);
-    appendAnalysisResult(data);
-    // Update local history for LLM context
-    const userContent = pendingFile ? `[CSV: ${pendingFile.name}]` : drugQuery;
-    chatHistory.push({ role: "user", content: userContent });
-    chatHistory.push({ role: "assistant", content: data.summary_text || "" });
-    if (chatHistory.length > 10) chatHistory = chatHistory.slice(-10);
-    clearFile();
 
   } catch (e) {
     removeTyping(typingId);
     appendBotMsg(`<span style="color:var(--do-not-switch)">⚠ Error: ${e.message}</span>`);
   } finally {
+    clearFile();
     btn.disabled = false;
     btn.textContent = "Send ▶";
   }
@@ -263,6 +266,18 @@ function clearSession() {
     </div>`;
   clearFile();
 }
+
+// ── LLM status badge ──────────────────────────────────────────────────────
+
+fetch("/api/config").then(r => r.json()).then(c => {
+  const el = document.getElementById("llm-status");
+  if (!el) return;
+  const active = c.use_llm?.toLowerCase() === "true" && c.model_name;
+  el.textContent = active
+    ? `✦ AI: ${c.model_name}`
+    : "○ LLM off (deterministic mode)";
+  el.style.color = active ? "var(--recommend)" : "var(--text-muted)";
+}).catch(() => {});
 
 // ── Utilities ─────────────────────────────────────────────────────────────
 

@@ -8,6 +8,7 @@ const API = {
 let allRecs = [];
 let sortCol = "risk_adjusted_savings";
 let sortDir = -1; // -1 = desc
+let currentPlan = "";
 
 // ── Fetch & render ────────────────────────────────────────────────────────
 
@@ -20,9 +21,12 @@ async function init() {
     renderSummary(summary);
     allRecs = recs;
     applyFiltersAndRender();
+    applyPlanTier("PLAN-GOLD-001");
+    renderCharts(recs);
+    document.getElementById("charts-section").style.display = "grid";
   } catch (err) {
     document.getElementById("table-body").innerHTML =
-      `<tr><td colspan="10" class="empty">Error loading data: ${err.message}</td></tr>`;
+      `<tr><td colspan="9" class="empty">Error loading data: ${err.message}</td></tr>`;
   }
 }
 
@@ -49,17 +53,44 @@ function set(id, val) {
 
 // ── Filters ───────────────────────────────────────────────────────────────
 
+function applyPlanTier(plan) {
+  const isBronze = plan === "PLAN-BRONZE-003";
+  const isSilver = plan === "PLAN-SILVER-002" || isBronze;
+  // Gold or unset = full access
+
+  // Members nav link — hide for Silver and Bronze
+  const membersLink = document.getElementById("nav-members");
+  if (membersLink) membersLink.style.display = isSilver ? "none" : "";
+
+  // Clinical/Access Risk column headers — hide for Bronze
+  const thClinical = document.querySelector('th[onclick*="clinical_risk_score"]');
+  const thAccess   = document.querySelector('th[onclick*="access_risk_score"]');
+  if (thClinical) thClinical.style.display = isBronze ? "none" : "";
+  if (thAccess)   thAccess.style.display   = isBronze ? "none" : "";
+
+  // Max Clinical Risk filter group — hide for Bronze
+  const clinicalFilter = document.getElementById("f-max-clinical")?.closest(".filter-group");
+  if (clinicalFilter) clinicalFilter.style.display = isBronze ? "none" : "";
+}
+
 function applyFiltersAndRender() {
-  const band     = document.getElementById("f-band").value;
-  const equiv    = document.getElementById("f-equiv").value;
-  const minSav   = parseFloat(document.getElementById("f-min-savings").value) || null;
-  const maxClin  = parseFloat(document.getElementById("f-max-clinical").value) || null;
+  const plan       = (document.getElementById("f-plan")?.value || "");
+  currentPlan = plan;
+  applyPlanTier(plan);
+  const band       = document.getElementById("f-band").value;
+  const equiv      = document.getElementById("f-equiv").value;
+  const minSav     = parseFloat(document.getElementById("f-min-savings").value) || null;
+  const maxClin    = parseFloat(document.getElementById("f-max-clinical").value) || null;
+  const drugSearch = (document.getElementById("f-drug-search")?.value || "").toLowerCase().trim();
 
   let recs = allRecs.filter(r => {
+    if (plan   && r.plan_id !== plan) return false;
     if (band   && r.recommendation_band !== band) return false;
     if (equiv  && r.equivalence_type !== equiv)   return false;
     if (minSav != null && r.risk_adjusted_savings < minSav) return false;
     if (maxClin != null && r.clinical_risk_score > maxClin) return false;
+    if (drugSearch && !((r.current_drug || "").toLowerCase().includes(drugSearch) ||
+                        (r.candidate_alternative || "").toLowerCase().includes(drugSearch))) return false;
     return true;
   });
 
@@ -71,8 +102,16 @@ function applyFiltersAndRender() {
 }
 
 function clearFilters() {
-  ["f-band","f-equiv"].forEach(id => document.getElementById(id).value = "");
-  ["f-min-savings","f-max-clinical"].forEach(id => document.getElementById(id).value = "");
+  const planEl = document.getElementById("f-plan");
+  if (planEl) planEl.value = "PLAN-GOLD-001";
+  ["f-band","f-equiv"].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.value = "";
+  });
+  ["f-min-savings","f-max-clinical","f-drug-search"].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.value = "";
+  });
   applyFiltersAndRender();
 }
 
@@ -110,31 +149,35 @@ function riskBar(score) {
 
 function renderTable(recs) {
   const tbody = document.getElementById("table-body");
+  const isBronze = currentPlan === "PLAN-BRONZE-003";
   if (recs.length === 0) {
-    tbody.innerHTML = `<tr><td colspan="10" class="empty">No opportunities match the current filters.</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="${isBronze ? 7 : 9}" class="empty">No opportunities match the current filters.</td></tr>`;
     return;
   }
+  const isSilver = currentPlan === "PLAN-SILVER-002" || isBronze;
 
   const rows = recs.map((r, i) => {
     const detailId = `detail-${i}`;
+    const clinicalCell = isBronze ? "" : `<td>${riskBar(r.clinical_risk_score)}</td>`;
+    const accessCell   = isBronze ? "" : `<td>${riskBar(r.access_risk_score)}</td>`;
     const mainRow = `
       <tr class="main-row" data-i="${i}">
         <td><button class="expand-btn" onclick="toggleDetail(${i})">&#9654;</button></td>
-        <td style="font-family:monospace;font-size:12px">${r.member_id}</td>
         <td><div style="max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${r.current_drug}">${r.current_drug}</div></td>
         <td><div style="max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${r.candidate_alternative}">${r.candidate_alternative}</div></td>
         <td>${equivBadge(r.equivalence_type)}</td>
         <td>${savingsCell(r.gross_savings)}</td>
         <td>${savingsCell(r.risk_adjusted_savings)}</td>
-        <td>${riskBar(r.clinical_risk_score)}</td>
-        <td>${riskBar(r.access_risk_score)}</td>
+        ${clinicalCell}
+        ${accessCell}
         <td>${bandBadge(r.recommendation_band)}</td>
       </tr>`;
 
     const codes = (r.reason_codes || []).map(c => `<span class="code-tag">${c}</span>`).join("");
+    const colCount = isBronze ? 7 : 9;
     const detailRow = `
       <tr class="detail-row" id="${detailId}">
-        <td class="detail-cell" colspan="10">
+        <td class="detail-cell" colspan="${colCount}">
           <div class="detail-panel">
             <div class="detail-grid">
               <div class="detail-section">
@@ -177,11 +220,11 @@ function renderTable(recs) {
               <h4>Payer/Pharmacist Explanation</h4>
               <div class="detail-explanation">${r.explanation}</div>
             </div>
-            <div style="margin-top:12px">
+            ${isSilver ? "" : `<div style="margin-top:12px">
               <button class="btn-download" onclick="downloadPackage('${r.recommendation_id}', this)">
                 &#128196; Download Switch Package (4 PDFs)
               </button>
-            </div>
+            </div>`}
           </div>
         </td>
       </tr>`;
@@ -244,6 +287,64 @@ async function downloadPackage(recId, btn) {
     btn.disabled = false;
     btn.textContent = orig;
   }
+}
+
+// ── Charts ────────────────────────────────────────────────────────────────
+
+function renderCharts(recs) {
+  const bands = ["Recommend", "Review", "Do Not Switch"];
+  const bandGross = bands.map(b => recs.filter(r => r.recommendation_band === b).reduce((s, r) => s + r.gross_savings, 0));
+  const bandRisk  = bands.map(b => recs.filter(r => r.recommendation_band === b).reduce((s, r) => s + r.risk_adjusted_savings, 0));
+
+  new Chart(document.getElementById("chart-band"), {
+    type: "bar",
+    data: {
+      labels: bands,
+      datasets: [
+        { label: "Gross Savings", data: bandGross, backgroundColor: "#2a5a8c" },
+        { label: "Risk-Adj. Savings", data: bandRisk, backgroundColor: "#1a7f4b" },
+      ],
+    },
+    options: {
+      indexAxis: "y",
+      plugins: { legend: { position: "bottom" } },
+      scales: { x: { ticks: { callback: v => "$" + Number(v).toLocaleString() } } },
+    },
+  });
+
+  const buckets = ["0–20%","20–40%","40–60%","60–80%","80–100%"];
+  const counts = [0, 0, 0, 0, 0];
+  recs.forEach(r => {
+    const i = Math.min(Math.floor(r.clinical_risk_score * 5), 4);
+    counts[i]++;
+  });
+  new Chart(document.getElementById("chart-risk"), {
+    type: "bar",
+    data: {
+      labels: buckets,
+      datasets: [{ label: "# Opportunities", data: counts, backgroundColor: ["#1a7f4b","#5aad7e","#f59e0b","#e05a2b","#b91c1c"] }],
+    },
+    options: { plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true, ticks: { precision: 0 } } } },
+  });
+
+  const drugMap = {};
+  recs.forEach(r => {
+    const key = (r.current_drug || "Unknown").split(" ").slice(0, 2).join(" ");
+    drugMap[key] = (drugMap[key] || 0) + r.gross_savings;
+  });
+  const sorted = Object.entries(drugMap).sort((a, b) => b[1] - a[1]).slice(0, 10);
+  new Chart(document.getElementById("chart-drugs"), {
+    type: "bar",
+    data: {
+      labels: sorted.map(([k]) => k),
+      datasets: [{ label: "Gross Savings", data: sorted.map(([, v]) => v), backgroundColor: "#0077cc" }],
+    },
+    options: {
+      indexAxis: "y",
+      plugins: { legend: { display: false } },
+      scales: { x: { ticks: { callback: v => "$" + Number(v).toLocaleString() } } },
+    },
+  });
 }
 
 // ── Boot ──────────────────────────────────────────────────────────────────

@@ -82,6 +82,7 @@ def build_recommendation(claim: ClaimRecord) -> Recommendation | None:
         recommendation_id=_build_recommendation_id(claim.claim_id, claim.member_id),
         member_id=claim.member_id,
         claim_id=claim.claim_id,
+        plan_id=claim.plan_id,
         current_drug=claim.drug_name,
         candidate_alternative=mapping.candidate_alternative,
         equivalence_type=mapping.equivalence_type,

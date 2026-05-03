@@ -12,3 +12,5 @@ python-multipart==0.0.12
 pytest>=7.4
 litellm>=1.40.0
 reportlab>=4.2.0
+chromadb>=0.5.0
+sentence-transformers>=3.0.0

@@ -85,9 +85,9 @@ function sortMembers(col) {
 
 async function showMemberDetail(memberId) {
   const data = await fetch(`/api/members/${encodeURIComponent(memberId)}`).then(r => r.json());
-  const panel = document.getElementById("member-detail-panel");
-  panel.style.display = "block";
-  panel.scrollIntoView({ behavior: "smooth", block: "start" });
+  const overlay = document.getElementById("member-modal-overlay");
+  overlay.style.display = "flex";
+  document.body.style.overflow = "hidden";
 
   document.getElementById("detail-member-title").textContent = `${memberId} — Claim Detail`;
   document.getElementById("detail-summary-inline").textContent =
@@ -112,8 +112,8 @@ async function showMemberDetail(memberId) {
     return `
       <tr class="main-row" data-i="d${i}">
         <td><button class="expand-btn" onclick="toggleMemberDetail(${i})">&#9654;</button></td>
-        <td><div style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${r.current_drug}">${r.current_drug}</div></td>
-        <td><div style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${r.candidate_alternative}">${r.candidate_alternative}</div></td>
+        <td style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${r.current_drug}">${r.current_drug}</td>
+        <td style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${r.candidate_alternative}">${r.candidate_alternative}</td>
         <td>${equivBadge(r.equivalence_type)}</td>
         <td><span class="savings-pos">${fmt$(r.gross_savings)}</span></td>
         <td><span class="${r.risk_adjusted_savings >= 0 ? 'savings-pos' : 'savings-neg'}">${fmt$(r.risk_adjusted_savings)}</span></td>
@@ -164,7 +164,8 @@ function toggleMemberDetail(i) {
 }
 
 function closeDetail() {
-  document.getElementById("member-detail-panel").style.display = "none";
+  document.getElementById("member-modal-overlay").style.display = "none";
+  document.body.style.overflow = "";
 }
 
 function pct(v) { return v == null ? "—" : Math.round(v * 100) + "%"; }

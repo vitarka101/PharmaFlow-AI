@@ -20,6 +20,8 @@ from __future__ import annotations
 
 import json
 import os
+from dotenv import load_dotenv
+load_dotenv()
 from scripts.models.schemas import DrugMapping
 from scripts.services.data_service import get_connection
 
@@ -192,6 +194,20 @@ def _llm_fallback(drug_name: str, history: list) -> DrugMapping:
     except ImportError:
         return _no_alternative(drug_name, "litellm not installed — run: pip install litellm")
 
+    # ── RAG context retrieval ──────────────────────────────────────────────
+    rag_context = ""
+    try:
+        from scripts.services.rag_service import retrieve_drug_context
+        rag_context = retrieve_drug_context(drug_name, n_results=3)
+    except Exception:
+        pass  # RAG is best-effort; never block the LLM path
+
+    rag_section = (
+        f"\n\nRelevant drug knowledge retrieved from our knowledge base:\n{rag_context}\n"
+        "Use the above context to ground your response. "
+        "If it directly answers the query, prefer it over parametric memory.\n"
+    ) if rag_context else ""
+
     system_prompt = (
         "You are a pharmacy benefit management assistant. "
         "When given a brand drug name, respond ONLY with a JSON object (no markdown) with these keys:\n"
@@ -202,6 +218,7 @@ def _llm_fallback(drug_name: str, history: list) -> DrugMapping:
         '  "confidence": float 0.0–1.0\n'
         '  "reason": string — one sentence explanation\n'
         "If no generic exists, set generic_name to empty string and confidence to 0.0."
+        + rag_section
     )
     user_msg = f"Find a generic alternative for: {drug_name}"
 

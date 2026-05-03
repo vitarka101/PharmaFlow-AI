@@ -21,9 +21,15 @@ from __future__ import annotations
 import io
 import csv
 import json
+import os
+import re
+import random
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Optional
+
+from dotenv import load_dotenv
+load_dotenv()  # load .env before any os.getenv calls
 
 from fastapi import FastAPI, HTTPException, Query, UploadFile, File, Form
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response
@@ -78,6 +84,20 @@ async def serve_chat() -> FileResponse:
 @app.get("/dashboard", include_in_schema=False)
 async def serve_dashboard() -> FileResponse:
     return FileResponse(str(TEMPLATES_DIR / "index.html"))
+
+
+# ---------------------------------------------------------------------------
+# Runtime config check
+# ---------------------------------------------------------------------------
+
+@app.get("/api/config")
+async def get_config():
+    return {
+        "use_llm": os.getenv("USE_LLM", "false"),
+        "model_name": os.getenv("MODEL_NAME", ""),
+        "data_mode": os.getenv("DATA_MODE", "synthetic"),
+        "recommendations_loaded": len(_recommendations),
+    }
 
 
 @app.get("/members", include_in_schema=False)
@@ -305,25 +325,19 @@ async def chat_analyze(
     # ── Mode 2: Drug name text query ───────────────────────────────────────
     elif drug_query and drug_query.strip():
         raw_query = drug_query.strip()
+        lowered = raw_query.lower()
 
-        # Out-of-context guard: must contain at least one word ≥ 3 chars that could be a drug
-        words = [w for w in raw_query.replace(",", " ").split() if len(w) >= 3]
-        if not words:
+        # Out-of-context guard
+        if lowered.strip() in {"hello", "hi", "hey", "thanks", "help", "bye"}:
             return _chat_out_of_context()
 
-        # Heuristic: single very-short words that are clearly not drug names
-        # (greetings, questions with no plausible drug token of length ≥ 5)
-        lowered = raw_query.lower()
-        greeting_only = lowered.strip() in {"hello", "hi", "hey", "thanks", "help", "bye"}
-        question_no_drug = (
-            any(lowered.startswith(q) for q in ("what is", "who is", "tell me", "how do"))
-            and not any(len(w) >= 5 for w in words)
-        )
-        if greeting_only or question_no_drug:
+        # Extract actual drug names from natural-language questions.
+        # e.g. "Can I switch to tadalafil instead of cialis 20mg?" → ["tadalafil", "cialis"]
+        drug_names = _extract_drug_names(raw_query)
+        if not drug_names:
             return _chat_out_of_context()
 
         mode = "query"
-        drug_names = [d.strip() for d in raw_query.replace(";", ",").split(",") if d.strip()]
 
         from scripts.models.schemas import ClaimRecord
         from scripts.agents.auditor_agent import run as auditor_run
@@ -341,17 +355,27 @@ async def chat_analyze(
                         "message": mapping.mapping_reason,
                     })
                 else:
+                    # Use drug-name-seeded defaults so different drugs give different outputs.
+                    # Keeps results deterministic per drug but varied across drugs.
+                    rng = random.Random(abs(hash(drug_name.upper())) % 10_000)
                     claim = ClaimRecord(
                         claim_id="QUERY-0001",
                         member_id=member_context or "QUERY-MEMBER",
-                        age_band="45-54", sex="F", zip3="100", plan_id="QUERY-PLAN",
+                        age_band=rng.choice(["35-44", "45-54", "55-64", "65-74"]),
+                        sex=rng.choice(["M", "F"]),
+                        zip3=rng.choice(["100", "200", "300", "400", "500"]),
+                        plan_id="QUERY-PLAN",
                         drug_name=drug_name, brand_generic_flag="B", ndc="",
-                        quantity=30.0, days_supply=30,
-                        fill_date="2024-01-01", paid_amount=0.0, member_cost_share=0.0,
+                        quantity=rng.choice([30.0, 60.0, 90.0]),
+                        days_supply=rng.choice([30, 60, 90]),
+                        fill_date="2025-01-01", paid_amount=0.0, member_cost_share=0.0,
                         pharmacy_id="PHX-0001", prescriber_id="NPI-0001",
-                        diagnosis_group="OTHER", adherence_score=0.85,
-                        prior_switch_failure_flag=0, estimated_event_cost=500.0,
-                        preferred_pharmacy_available=1, pharmacy_access_score=0.80,
+                        diagnosis_group=rng.choice(["CARDIOVASCULAR", "DIABETES", "RESPIRATORY", "OTHER"]),
+                        adherence_score=round(rng.uniform(0.65, 0.98), 2),
+                        prior_switch_failure_flag=0,
+                        estimated_event_cost=round(rng.uniform(300.0, 1500.0), 2),
+                        preferred_pharmacy_available=rng.choice([0, 1, 1, 1]),
+                        pharmacy_access_score=round(rng.uniform(0.55, 0.95), 2),
                     )
                     cost = auditor_run(claim, mapping)
                     clinical = clinician_run(claim, mapping, cost)
@@ -420,6 +444,123 @@ async def chat_analyze(
     }
 
 
+_QUESTION_PREFIXES = re.compile(
+    r"^(can\s+i|should\s+i|could\s+i|is\s+it\s+ok\s+to|what\s+(is|are|about|can)|"
+    r"how\s+(about|do\s+i)|tell\s+me\s+about|compare|check|look\s+up|find|"
+    r"is\s+there\s+a|are\s+there|do\s+you\s+know|help\s+me\s+(with|find))\s+",
+    re.I,
+)
+# Words/phrases that are never drug names — all lowercase for case-insensitive matching
+_STOP_WORDS: set[str] = {
+    # question words
+    "what", "which", "who", "where", "when", "why", "how",
+    # demonstratives / indefinite pronouns
+    "that", "this", "these", "those", "something", "anything", "nothing",
+    "some", "any", "all", "both", "each", "every", "other", "another",
+    # modals / auxiliaries
+    "can", "could", "should", "would", "will", "shall", "may", "might", "must",
+    # verb forms
+    "be", "been", "being", "is", "are", "was", "were",
+    "have", "has", "had", "do", "does", "did",
+    "get", "got", "use", "used", "using", "take", "taking",
+    "replace", "replaced", "replacing", "switch", "switched", "switching",
+    "give", "find", "want", "need", "know", "show", "help",
+    # connectors / prepositions
+    "instead", "with", "without", "of", "in", "at", "by", "about", "into", "than",
+    "instead of", "switch to", "switch from", "replace with", "rather than",
+    "compared to", "vs", "versus",
+    # articles / pronouns
+    "or", "and", "the", "a", "an", "my", "me", "i", "it", "its",
+    "he", "she", "they", "we", "you", "his", "her", "their", "our",
+    # adjectives that appear in drug queries
+    "cheaper", "cheap", "less", "expensive", "affordable", "cost", "costly",
+    "safe", "safer", "better", "good", "best", "similar", "same",
+    "possible", "available", "ok", "okay", "effective",
+    # misc
+    "on", "for", "from", "to", "also", "just", "only", "not", "no",
+    "please", "thanks", "thank", "yes", "yeah", "nope",
+    # domain stop words
+    "drug", "drugs", "medicine", "medicines", "medication", "medications",
+    "pill", "pills", "tablet", "tablets", "capsule", "capsules",
+    "generic", "brand", "alternative", "alternatives", "equivalent",
+}
+_DRUG_TOKEN = re.compile(r"\b([A-Za-z][A-Za-z0-9\-]{2,}(?:\s+\d+\s*(?:mg|mcg|ml|g|iu|units?|tabs?|caps?))?\b)")
+
+
+def _is_plausible_drug_name(token: str) -> bool:
+    """Return True if the token starts a known drug name in NADAC or Orange Book.
+
+    Uses a prefix match (LIKE 'KEY%') so common English words that happen to
+    appear as substrings inside drug descriptions (e.g. THAT, SOMETHING) are
+    rejected unless they actually start a drug name.
+    """
+    from scripts.services.data_service import get_connection
+    try:
+        con = get_connection()
+        key = token.strip().split()[0].upper()
+        if len(key) < 4:  # single short words are almost never drug names
+            return False
+        # Prefix match: drug name must START with the token word
+        row = con.execute(
+            "SELECT 1 FROM nadac WHERE UPPER(ndc_description) LIKE ? LIMIT 1",
+            [f"{key}%"]
+        ).fetchone()
+        if row:
+            return True
+        row = con.execute(
+            "SELECT 1 FROM orange_book WHERE UPPER(trade_name) LIKE ? LIMIT 1",
+            [f"{key}%"]
+        ).fetchone()
+        return row is not None
+    except Exception:
+        return True  # fail open — let map_drug() decide
+
+
+def _extract_drug_names(text: str) -> list[str]:
+    """
+    Extract drug-like tokens from a natural-language question.
+
+    Strategy:
+    1. Strip leading question phrases.
+    2. Remove connector phrases (switch to, replace with, etc.).
+    3. If commas/semicolons exist, split on those directly.
+    4. Otherwise use regex to extract word tokens.
+    5. Drop stop words and validate each token against the drug database.
+    """
+    cleaned = _QUESTION_PREFIXES.sub("", text.strip())
+    # Remove connector phrases (including inflected forms)
+    cleaned = re.sub(
+        r"\b(instead\s+of|switch(?:ed|ing)?\s+to|switch(?:ed|ing)?\s+from|"
+        r"replace[sd]?\s+with|rather\s+than|compared\s+to|vs\.?|versus)\b",
+        " ", cleaned, flags=re.I,
+    )
+
+    # Comma/semicolon-separated list: split directly
+    if re.search(r"[,;]", cleaned):
+        parts = re.split(r"[,;]+", cleaned)
+        candidates = [p.strip() for p in parts if p.strip()]
+    else:
+        candidates = _DRUG_TOKEN.findall(cleaned)
+
+    results: list[str] = []
+    seen: set[str] = set()
+    for c in candidates:
+        c = c.strip()
+        if c.lower() in _STOP_WORDS:
+            continue
+        if len(c) < 3:
+            continue
+        key = c.upper()
+        if key in seen:
+            continue
+        if not _is_plausible_drug_name(c):
+            continue  # not found in NADAC or Orange Book — drop silently
+        seen.add(key)
+        results.append(c)
+
+    return results
+
+
 def _chat_error(msg: str) -> JSONResponse:
     return JSONResponse(status_code=400, content={"error": msg})
 
@@ -477,6 +618,34 @@ def _build_summary_text(mode, valid, no_alt, total_gross, total_risk_adj, band_c
         "This is not clinical advice — refer all switch decisions to a pharmacist or clinician."
     )
     return " ".join(parts)
+
+
+# ---------------------------------------------------------------------------
+# API: CSV export
+# ---------------------------------------------------------------------------
+
+@app.get("/api/export/opportunities.csv")
+async def export_opportunities_csv():
+    """Download all recommendations as a CSV spreadsheet."""
+    output = io.StringIO()
+    fieldnames = [
+        "recommendation_id", "member_id", "current_drug", "candidate_alternative",
+        "equivalence_type", "te_code", "gross_savings", "risk_adjusted_savings",
+        "clinical_risk_score", "access_risk_score", "recommendation_band",
+        "switch_failure_probability", "credible_interval_low", "credible_interval_high",
+        "reason_codes",
+    ]
+    writer = csv.DictWriter(output, fieldnames=fieldnames, extrasaction="ignore")
+    writer.writeheader()
+    for r in _recommendations:
+        d = r.model_dump()
+        d["reason_codes"] = "|".join(d.get("reason_codes") or [])
+        writer.writerow({k: d.get(k, "") for k in fieldnames})
+    return Response(
+        content=output.getvalue(),
+        media_type="text/csv",
+        headers={"Content-Disposition": "attachment; filename=pharmaflow_opportunities.csv"},
+    )
 
 
 # ---------------------------------------------------------------------------

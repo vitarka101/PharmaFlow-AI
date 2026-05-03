@@ -22,7 +22,7 @@
 <nav class="topnav">
   <a href="/" class="active">Prescription Advisor</a>
   <a href="/dashboard">Dashboard</a>
-  <a href="/members">Members</a>
+  <a href="/members" id="nav-members">Members</a>
 </nav>
 
 <main class="chat-layout">
@@ -48,6 +48,10 @@
     </div>
 
     <div id="session-results-list" style="margin-top:16px"></div>
+
+    <div id="llm-status" style="margin-top:auto;padding-top:16px;font-size:11px;color:var(--text-muted);border-top:1px solid var(--border)">
+      ○ Checking AI status…
+    </div>
   </div>
 
   <!-- Right: Chat window -->
@@ -82,6 +86,7 @@
           or drag &amp; drop
         </span>
         <span id="file-ready" style="display:none;color:var(--recommend);font-weight:600"></span>
+        <button id="file-cancel" onclick="clearFile()" style="display:none;margin-left:8px;background:none;border:none;cursor:pointer;color:var(--do-not-switch);font-size:14px;font-weight:700" title="Remove file">✕</button>
       </div>
 
       <div class="chat-row">

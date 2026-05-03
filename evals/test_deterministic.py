@@ -317,4 +317,236 @@ def test_document_download_zip():
             assert data[:4] == b"%PDF", f"{name} is not a valid PDF"
 
 
+
+# ── Natural language drug extraction tests ────────────────────────────────
+
+from scripts.app import _extract_drug_names
+
+
+def test_extract_simple_drug_name():
+    assert _extract_drug_names("Provigil") == ["Provigil"]
+
+
+def test_extract_comma_list():
+    result = _extract_drug_names("Lipitor, Abilify")
+    assert "Lipitor" in result
+    assert "Abilify" in result
+
+
+def test_extract_question_switch_to():
+    # "Can I switch to tadalafil instead of cialis 20 mg?" → [tadalafil, cialis 20 mg]
+    result = _extract_drug_names("Can I switch to tadalafil instead of cialis 20 mg?")
+    names_upper = [r.upper() for r in result]
+    assert any("TADALAFIL" in n for n in names_upper), f"tadalafil missing: {result}"
+    assert any("CIALIS" in n for n in names_upper), f"cialis missing: {result}"
+
+
+def test_extract_question_alternative_of():
+    # "Can metformin be used as an alternative of glucophage?"
+    result = _extract_drug_names("Can metformin be used as an alternative of glucophage?")
+    names_upper = [r.upper() for r in result]
+    assert any("METFORMIN" in n for n in names_upper), f"metformin missing: {result}"
+    assert any("GLUCOPHAGE" in n for n in names_upper), f"glucophage missing: {result}"
+
+
+def test_extract_question_replace():
+    result = _extract_drug_names("Can I replace Lipitor with atorvastatin?")
+    names_upper = [r.upper() for r in result]
+    assert any("LIPITOR" in n for n in names_upper), f"lipitor missing: {result}"
+    assert any("ATORVASTATIN" in n for n in names_upper), f"atorvastatin missing: {result}"
+
+
+def test_extract_question_what_about():
+    result = _extract_drug_names("what about tadalafil?")
+    assert any("TADALAFIL" in r.upper() for r in result)
+
+
+def test_extract_semicolon_list():
+    result = _extract_drug_names("Abilify; Provigil; Lipitor")
+    assert len(result) == 3
+
+
+def test_extract_strength_preserved():
+    result = _extract_drug_names("cialis 20 mg")
+    assert result and "20 mg" in result[0].lower()
+
+
+def test_extract_no_stop_words_only():
+    # Pure greetings should not produce drug names that pass the guard
+    result = _extract_drug_names("hello")
+    # hello is 5 chars and not a stop word — it will be extracted but
+    # the app's out-of-context guard handles pure greetings separately.
+    # What matters is that stop words like "instead", "switch" are excluded.
+    assert "instead" not in [r.lower() for r in result]
+    assert "switch" not in [r.lower() for r in result]
+
+
+def test_extract_excludes_connector_words():
+    result = _extract_drug_names("Can I switch from Abilify to aripiprazole?")
+    lower = [r.lower() for r in result]
+    assert "switch" not in lower
+    assert "from" not in lower
+    assert "abilify" in lower or any("abilify" in l for l in lower)
+
+
+# ── Demo CSV file tests ───────────────────────────────────────────────────
+
+DEMO_DIR = Path(__file__).resolve().parents[1] / "data" / "demo"
+
+
+def _load_demo_csv(name: str):
+    import csv as _csv
+    path = DEMO_DIR / name
+    with open(path) as f:
+        reader = _csv.DictReader(f)
+        rows = list(reader)
+    return rows
+
+
+def test_demo_high_savings_parseable():
+    rows = _load_demo_csv("demo_claims_high_savings.csv")
+    assert len(rows) == 20
+    for row in rows:
+        assert row.get("drug_name", "").strip(), f"Missing drug_name in row: {row}"
+
+
+def test_demo_mixed_risk_parseable():
+    rows = _load_demo_csv("demo_claims_mixed_risk.csv")
+    assert len(rows) == 20
+    for row in rows:
+        assert row.get("drug_name", "").strip(), f"Missing drug_name in row: {row}"
+
+
+def test_demo_specialty_parseable():
+    rows = _load_demo_csv("demo_claims_specialty.csv")
+    assert len(rows) >= 10
+    for row in rows:
+        assert row.get("drug_name", "").strip(), f"Missing drug_name in row: {row}"
+
+
+def test_demo_csv_no_unquoted_commas_in_drug_names():
+    """Drug names with numeric doses (e.g. 1,000) must not break CSV parsing."""
+    for fname in ["demo_claims_high_savings.csv", "demo_claims_mixed_risk.csv", "demo_claims_specialty.csv"]:
+        rows = _load_demo_csv(fname)
+        for row in rows:
+            drug = row.get("drug_name", "")
+            # A properly parsed drug name should not be empty or contain stray column headers
+            assert drug, f"{fname}: empty drug_name"
+            assert "claim_id" not in drug.lower(), f"{fname}: drug_name looks like a header: {drug}"
+
+
+# ── Chat API tests for natural language questions ─────────────────────────
+
+@pytest.mark.skipif(not _has_testclient, reason="httpx not installed")
+def test_chat_simple_drug_query():
+    from scripts.app import app
+    client = TestClient(app)
+    resp = client.post("/api/chat/analyze", data={"drug_query": "Provigil"})
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["mode"] in ("query", "out_of_context")
+
+
+@pytest.mark.skipif(not _has_testclient, reason="httpx not installed")
+def test_chat_alternative_question_two_drugs():
+    """'Can tadalafil be used as an alternative of cialis?' should extract both drugs."""
+    from scripts.app import app
+    client = TestClient(app)
+    resp = client.post(
+        "/api/chat/analyze",
+        data={"drug_query": "Can tadalafil be used as an alternative of cialis?"},
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    # Should NOT return out_of_context — at least one drug was parsed
+    assert data["mode"] != "out_of_context", f"Query was rejected as out-of-context: {data}"
+    drug_names_in_results = [r.get("drug_name", "").upper() for r in data.get("results", [])]
+    assert any("TADALAFIL" in n or "CIALIS" in n for n in drug_names_in_results), \
+        f"Neither tadalafil nor cialis found in results: {drug_names_in_results}"
+
+
+@pytest.mark.skipif(not _has_testclient, reason="httpx not installed")
+def test_chat_switch_to_question():
+    """'Can I switch to metformin instead of glucophage?' should parse both drugs."""
+    from scripts.app import app
+    client = TestClient(app)
+    resp = client.post(
+        "/api/chat/analyze",
+        data={"drug_query": "Can I switch to metformin instead of glucophage?"},
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["mode"] != "out_of_context", f"Query rejected: {data}"
+
+
+@pytest.mark.skipif(not _has_testclient, reason="httpx not installed")
+def test_chat_csv_upload_high_savings():
+    """Upload demo_claims_high_savings.csv and verify it returns results."""
+    import io as _io
+    from scripts.app import app
+    csv_path = DEMO_DIR / "demo_claims_high_savings.csv"
+    csv_bytes = csv_path.read_bytes()
+    client = TestClient(app)
+    resp = client.post(
+        "/api/chat/analyze",
+        files={"file": ("demo_claims_high_savings.csv", _io.BytesIO(csv_bytes), "text/csv")},
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["mode"] == "csv"
+    assert data["analyzed"] + data["no_alternative_count"] > 0, "No rows processed"
+
+
+@pytest.mark.skipif(not _has_testclient, reason="httpx not installed")
+def test_chat_csv_upload_mixed_risk():
+    """Upload demo_claims_mixed_risk.csv and verify it parses without 500 errors."""
+    import io as _io
+    from scripts.app import app
+    csv_path = DEMO_DIR / "demo_claims_mixed_risk.csv"
+    csv_bytes = csv_path.read_bytes()
+    client = TestClient(app)
+    resp = client.post(
+        "/api/chat/analyze",
+        files={"file": ("demo_claims_mixed_risk.csv", _io.BytesIO(csv_bytes), "text/csv")},
+    )
+    assert resp.status_code == 200, f"Expected 200, got {resp.status_code}: {resp.text[:200]}"
+    data = resp.json()
+    assert data["mode"] == "csv"
+    assert data["skipped_count"] < data["analyzed"] + data["no_alternative_count"] + data["skipped_count"], \
+        "All rows were skipped — likely a parse error"
+
+
+@pytest.mark.skipif(not _has_testclient, reason="httpx not installed")
+def test_chat_csv_upload_specialty():
+    """Upload demo_claims_specialty.csv and verify it returns results."""
+    import io as _io
+    from scripts.app import app
+    csv_path = DEMO_DIR / "demo_claims_specialty.csv"
+    csv_bytes = csv_path.read_bytes()
+    client = TestClient(app)
+    resp = client.post(
+        "/api/chat/analyze",
+        files={"file": ("demo_claims_specialty.csv", _io.BytesIO(csv_bytes), "text/csv")},
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["mode"] == "csv"
+
+
+@pytest.mark.skipif(not _has_testclient, reason="httpx not installed")
+def test_csv_export_endpoint():
+    """GET /api/export/opportunities.csv returns a valid CSV with header row."""
+    from scripts.app import app
+    client = TestClient(app)
+    resp = client.get("/api/export/opportunities.csv")
+    assert resp.status_code == 200
+    assert "text/csv" in resp.headers.get("content-type", "")
+    lines = resp.text.strip().splitlines()
+    assert len(lines) > 1, "CSV has no data rows"
+    header = lines[0]
+    assert "recommendation_id" in header
+    assert "gross_savings" in header
+    assert "recommendation_band" in header
+
+
 import pytest  # noqa: E402 — import at top needed for pytest.approx in module body

@@ -22,7 +22,7 @@
 <nav class="topnav">
   <a href="/">Prescription Advisor</a>
   <a href="/dashboard" class="active">Dashboard</a>
-  <a href="/members">Members</a>
+  <a href="/members" id="nav-members">Members</a>
 </nav>
 
 <main>
@@ -61,8 +61,32 @@
     </div>
   </div>
 
+  <!-- Charts section -->
+  <div class="charts-grid" id="charts-section" style="display:none">
+    <div class="chart-card">
+      <h3>Savings by Band</h3>
+      <canvas id="chart-band" height="200"></canvas>
+    </div>
+    <div class="chart-card">
+      <h3>Clinical Risk Distribution</h3>
+      <canvas id="chart-risk" height="200"></canvas>
+    </div>
+    <div class="chart-card">
+      <h3>Top 10 Drugs by Gross Savings</h3>
+      <canvas id="chart-drugs" height="200"></canvas>
+    </div>
+  </div>
+
   <!-- Filters -->
   <div class="filters">
+    <div class="filter-group">
+      <label>Plan / Cohort</label>
+      <select id="f-plan" onchange="applyFiltersAndRender()">
+        <option value="PLAN-GOLD-001" selected>Gold Plan</option>
+        <option value="PLAN-SILVER-002">Silver Plan</option>
+        <option value="PLAN-BRONZE-003">Bronze Plan</option>
+      </select>
+    </div>
     <div class="filter-group">
       <label>Recommendation Band</label>
       <select id="f-band" onchange="applyFiltersAndRender()">
@@ -88,7 +112,15 @@
       <label>Max Clinical Risk (0–1)</label>
       <input type="number" id="f-max-clinical" placeholder="e.g. 0.3" oninput="applyFiltersAndRender()" step="0.05" min="0" max="1" />
     </div>
+    <div class="filter-group">
+      <label>Search Drug Name</label>
+      <input type="text" id="f-drug-search" placeholder="e.g. Abilify" oninput="applyFiltersAndRender()" />
+    </div>
     <button class="btn-clear" onclick="clearFilters()">Clear Filters</button>
+    <a id="btn-export-csv" href="/api/export/opportunities.csv" download="pharmaflow_opportunities.csv"
+       style="padding:6px 14px;background:var(--primary);color:#fff;border-radius:5px;text-decoration:none;font-size:13px;align-self:flex-end">
+      ⬇ Export CSV
+    </a>
   </div>
 
   <!-- Opportunity table -->
@@ -101,7 +133,6 @@
       <thead>
         <tr>
           <th style="width:32px"></th>
-          <th>Member</th>
           <th>Current Drug</th>
           <th>Generic Alternative</th>
           <th>Equivalence</th>
@@ -113,7 +144,7 @@
         </tr>
       </thead>
       <tbody id="table-body">
-        <tr><td colspan="10" class="loading">Loading opportunities&hellip;</td></tr>
+        <tr><td colspan="9" class="loading">Loading opportunities&hellip;</td></tr>
       </tbody>
     </table>
   </div>
@@ -126,6 +157,7 @@
   All member data is synthetic.
 </footer>
 
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <script src="/static/js/dashboard.js"></script>
 </body>
 </html>

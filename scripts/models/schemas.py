@@ -99,6 +99,7 @@ class Recommendation(BaseModel):
     recommendation_id: str
     member_id: str
     claim_id: str
+    plan_id: str
 
     # Drug identity
     current_drug: str

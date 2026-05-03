@@ -15,7 +15,4 @@ steps:
       - "--allow-unauthenticated"
       - "--port=8080"
       - "--memory=2Gi"
-      - "--update-env-vars=DATA_MODE=synthetic,USE_LLM=false,SYNC_DATA_TO_GCS=false"
-
-images:
-  - "gcr.io/$PROJECT_ID/pharmaflow-ai"
+      - "--update-env-vars=DATA_MODE=synthetic,USE_LLM=true,SYNC_DATA_TO_GCS=false,MODEL_NAME=vertex_ai/gemini-2.5-flash-lite"
