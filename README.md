@@ -6,11 +6,13 @@
 
 ## What Is This?
 
-PharmaFlow AI is a **payer-side pharmacy benefit intelligence platform** that automatically identifies where an insurance company can save money on drug spend — without compromising member health outcomes.
+**PharmaFlow AI helps insurance companies find expensive brand-name prescription claims that may have lower-cost generic options, estimate savings, and create doctor/patient review documents before any switch is made.**
 
-It ingests a payer's claims data, runs each brand-name drug through a four-agent AI pipeline, and outputs a ranked list of generic switch opportunities with full clinical risk, adherence risk, access risk, and confidence scores — ready for pharmacist review.
+It ingests a payer's claims CSV, runs each brand-name drug through a four-agent AI pipeline, and outputs a ranked list of generic switch opportunities with full clinical risk, adherence risk, access risk, and confidence scores — packaged into ready-to-use review documents for doctors, patients, and pharmacists.
 
-> **Not clinical decision support. Not a medical device. All member data is de-identified.  Source: Aetna (redacted).**
+PharmaFlow AI does not automatically tell a patient to switch medicine. Instead, it finds possible savings opportunities and packages them for human review. The insurer can then ask a doctor, pharmacist, or clinical team to review whether the patient can safely move from the brand drug to the generic alternative.
+
+> **All member data is de-identified. Source: Aetna (redacted). Not a medical device. Not clinical decision support.**
 
 ---
 
@@ -18,11 +20,13 @@ It ingests a payer's claims data, runs each brand-name drug through a four-agent
 
 ### Who Uses This
 
-| User | Problem |
-|------|---------|
-| **Pharmacy Benefit Managers (PBMs)** | Need to identify generic switch opportunities across millions of claims without manual review |
-| **Insurance Payer Analysts** | Need to prioritize which switches are actually worth pursuing after risk adjustment |
-| **Clinical Pharmacists** | Need structured, evidence-grounded switch packages to act on recommendations |
+| Customer | Concrete User | Problem Today | Why They Pay |
+|----------|--------------|---------------|--------------|
+| **Primary: insurance company / health plan** | Pharmacy analytics analyst, medical economics analyst, or pharmacy benefit director | Claims are available, but it is hard to quickly know which brand-drug claims have a cheaper generic option and which require clinical review. | If the plan saves even a small amount per member, it can reduce drug spend, improve margins, and potentially support more competitive insurance pricing. |
+| **Secondary: PBM or benefits team** | Formulary manager or client service lead | They need a simple way to explain savings opportunities and review exceptions. | The tool creates a repeatable review process instead of one-off manual spreadsheet work. |
+| **Indirect: patients and doctors** | Patient, physician, pharmacist | They may not see total plan cost or generic options at the right time. | They benefit from clearer, safer cost conversations, but they are not the main buyer. |
+
+**Example business value:** if an insurer finds that 500 members are using a high-cost brand drug and a doctor-reviewed generic option saves even $40/member/month, that is $20,000 in monthly savings on one opportunity. Across many drugs and members, the savings can become meaningful enough to lower costs, improve the plan's financial position, and help the insurer serve more members.
 
 ### The Problem
 
@@ -36,19 +40,27 @@ Manual review by pharmacists costs $80–$150/hour and can only cover a tiny fra
 
 ### Monetization
 
-| Tier | Price | Features |
-|------|-------|---------|
-| **Gold** | $2,500/month | Full access — all tabs, PDF switch packages, clinical + access risk |
-| **Silver** | $1,200/month | Dashboard + Prescription Advisor, no member-level detail, no PDFs |
-| **Bronze** | $500/month | Dashboard only, no clinical/access risk columns |
+| Plan | Price / Month | Best For | Included | Not Included |
+|------|--------------|----------|----------|--------------|
+| **Bronze** | $500 | Small plan doing a quick savings scan | Brand-vs-generic opportunity list; gross savings estimate; dashboard summary | No member-level view; no downloads; no clinical risk or access risk flags |
+| **Silver** | $1,200 | Payer team that wants safer prioritization | Everything in Bronze + clinical-risk and access-risk summaries, Recommend/Review/Do Not Switch bands, portfolio charts | No member-level details; no CSV export; no switch-package document download |
+| **Gold ★** | $2,500 | Insurance company ready to act on findings | Everything in Silver + member-level view, CSV export, and four switch-package documents: doctor review note, patient explanation, pharmacist outreach letter, internal payer/formulary memo | No real-time rebate modeling unless added as enterprise integration |
 
 ### Unit Economics
 
-- Average payer manages **50,000–500,000 claims/year**
-- Industry benchmark: **3–7% of claims** have actionable generic switch opportunity
-- Average gross savings per switch: **$800–$2,400/fill cycle**
-- PharmaFlow identifies and risk-ranks all candidates automatically
-- A single mid-size payer client at Gold tier generates **$30K ARR** with near-zero marginal cost per recommendation
+| Item | Bronze | Silver | Gold |
+|------|--------|--------|------|
+| Monthly price | $500 | $1,200 | $2,500 |
+| Expected cloud + database cost | $60 | $90 | $150 |
+| Expected LLM/token cost | $1–$5 | $3–$10 | $10–$30 |
+| PDF/export generation cost | $0 | $0 | $25–$75 |
+| Support + monitoring allowance | $100 | $200 | $350 |
+| **Estimated total cost to serve** | **$161–$165** | **$293–$300** | **$535–$605** |
+| **Approx. gross margin** | **~67%** | **~75%** | **~75%** |
+
+**Token economics:** 1,000 analyzed opportunities use ~4,000 input + 1,000 output tokens each → ~4M input + 1M output tokens total. At a low-cost flash model (~$0.10/1M input, ~$0.40/1M output), the LLM bill is under $1 for core analysis. PharmaFlow is not token-heavy because the expensive work is done by DuckDB lookups, pricing formulas, and structured outputs.
+
+**Break-even logic:** Gold only needs one or two meaningful switch opportunities to justify its price. If the product helps the insurer safely review 100 members where the net saving is $75/member/month, that is $7,500/month in potential savings versus a $2,500/month Gold subscription.
 
 ---
 
@@ -251,7 +263,11 @@ DuckDB SQL (warehouse mart), ChromaDB vector search (drug knowledge RAG), and pa
 ### Module 3 — Thinking and Planning
 
 **Artifacts**
-- **Switch Package**: "Download Switch Package" generates 4 PDFs (Member Summary, Formulary Comparison, Clinical Risk Report, Pharmacist Outreach Letter) via `reportlab`, zipped and returned as `switch_package_{id}.zip`
+- **Switch Package** (Gold only): "Download Switch Package" generates 4 PDFs via `reportlab`, zipped as `switch_package_{id}.zip`:
+  1. **Internal Utilization Management Memo** — for the insurer's pharmacy benefits and clinical review teams
+  2. **Prescriber Clinical Review Letter** — sent to the doctor, explains the proposed generic substitution and asks for approval
+  3. **Member Benefit Letter** — sent to the patient in plain language, explains the possible lower-cost alternative
+  4. **Pharmacy Network Alignment Notice** — sent to the dispensing pharmacy to prepare for the member's next refill
 - **CSV Export**: `/api/export/opportunities.csv` exports filtered opportunities for payer workflow integration
 
 **State, memory, and persistence**
@@ -307,7 +323,7 @@ Three Chart.js charts rendered client-side from `/api/recommendations`:
 | CMS NADAC | Real public data | National Average Drug Acquisition Cost — unit pricing for ~20,000 NDCs (April 2026) |
 | FDA Orange Book | Real public data | Products, patents, exclusivity, TE codes (May 2026) |
 | Aetna Claims | De-identified | 500 member claims — realistic field distributions |
-| Demo CSVs | Synthetic | `data/demo/` — high-savings and mixed-risk portfolios for live demo |
+| Demo CSVs | Aetna Claims Data (De-identified) | `data/demo/` — high-savings and mixed-risk portfolios for live demo |
 
 ---
 
@@ -451,6 +467,21 @@ curl "$SERVICE_URL/health"
 ├── .env.example
 └── DEMO_QUESTIONS.txt
 ```
+
+---
+
+## Why the Technical Choices Fit the Business
+
+| Technical Choice | Business Reason |
+|-----------------|----------------|
+| **FastAPI + single web app** | Keeps deployment simple for a class demo and for a small payer. One service hosts the upload flow, dashboard, API, and document downloads. |
+| **DuckDB warehouse over NADAC + Orange Book** | Insurance users need fast, repeatable answers. DuckDB gives cheap SQL lookups for pricing and equivalence instead of calling an LLM for every claim. |
+| **Four-agent pipeline** | The work naturally separates into four jobs: find the generic, price the switch, check clinical risk, and check access/adherence. This makes the output easier to trust and explain. |
+| **Structured Pydantic outputs** | Savings and risk fields are validated before they reach the dashboard. This reduces hallucination risk and makes the result more audit-friendly for healthcare users. |
+| **RAG (ChromaDB)** | RAG helps answer unknown-drug questions, but it is not the core pricing engine. That keeps costs low and avoids using the LLM for sensitive calculations. |
+| **Gold switch-package artifacts** | The business value is not just finding savings — it is helping the insurer act. Downloadable documents make the product useful inside real payer workflows. |
+
+> **Note:** PharmaFlow AI is decision support, not a medical prescriber. It says "requires doctor/pharmacist review," not "switch this patient." The demo uses de-identified Aetna Claims data. A real customer version would need secure data handling, HIPAA-aware workflows, access controls, audit logs, and contract-specific rebate/formulary integrations.
 
 ---
 
