@@ -62,6 +62,11 @@ Manual review by pharmacists costs $80–$150/hour and can only cover a tiny fra
 
 **Break-even logic:** Gold only needs one or two meaningful switch opportunities to justify its price. If the product helps the insurer safely review 100 members where the net saving is $75/member/month, that is $7,500/month in potential savings versus a $2,500/month Gold subscription.
 
+**Where the economics break:** The economics break if the customer is too small, uploads too few claims, or uses the product only for reports without
+acting on any switch opportunities. For example, if a Gold customer pays $2,500/month but only identifies $1,000/month of realistic savings, the
+product is not justified. The model works best when the payer has enough monthly claim volume and enough brand-drug spend for even a small
+number of safe switches to exceed the subscription price.
+
 ---
 
 ## Live Demo
@@ -99,35 +104,7 @@ Upload `data/demo/demo_claims_high_savings.csv` — full portfolio analysis with
 
 ## Architecture
 
-```
-┌─────────────────────────────────────────────────────────────────────┐
-│                        Browser UI                                    │
-│   Prescription Advisor  │  Dashboard  │  Members                    │
-└─────────────────────────┬───────────────────────────────────────────┘
-                          │ HTTP / JSON
-                          ▼
-┌─────────────────────────────────────────────────────────────────────┐
-│                      FastAPI Application                             │
-│                      scripts/app.py                                  │
-└────────┬────────────────┬─────────────────┬────────────────┬────────┘
-         │                │                 │                │
-         ▼                ▼                 ▼                ▼
-  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐
-  │  Librarian  │  │   Auditor   │  │  Clinician  │  │   Social    │
-  │    Agent    │  │    Agent    │  │    Agent    │  │  Navigator  │
-  │ Drug Mapping│  │Cost Analysis│  │ Clinical    │  │   Agent     │
-  │             │  │             │  │    Risk     │  │Access/Adher.│
-  └──────┬──────┘  └──────┬──────┘  └──────┬──────┘  └──────┬──────┘
-         └────────────────┴─────────────────┴────────────────┘
-                          │
-          ┌───────────────┼───────────────┐
-          ▼               ▼               ▼
-   DuckDB Warehouse   ChromaDB RAG   Pandas CSV
-   (NADAC + Orange    (Drug Knowledge  (Claims Upload
-    Book SQL mart)     Vector Store)   at Runtime)
-```
-
-One FastAPI service. No separate frontend build step. No Kubernetes.
+![Alt text](pharmaflow_ai_architecture.svg)
 
 ---
 
@@ -213,106 +190,233 @@ The final band only emerges after all four agents have run. Every number is trac
 
 ## Class Concepts Applied
 
-This project directly implements **14+ concepts** from the Columbia Agentic AI course syllabus:
-
 ### Module 1 — LLMs, Prompt Engineering, and Validation
 
 **Role-based messages (system / user / assistant)**
-LLM fallback in `drug_mapping_service.py` constructs a proper `[system, ...history, user]` message array with a PBM assistant persona and injected conversation history.
+- LLM fallback builds a `[system, ...history, user]` message array with a PBM persona and injected conversation history
+- → `scripts/services/drug_mapping_service.py` → `_llm_fallback()`
 
-**Model adapters — LiteLLM**
-All LLM calls go through `litellm.completion()`. Switching between `vertex_ai/gemini-2.5-flash-lite`, `anthropic/claude-...`, or `openai/gpt-...` requires only a one-line `.env` change.
+**Model adapters (LiteLLM)**
+- All LLM calls route through `litellm.completion()` — swap `vertex_ai/gemini-2.5-flash-lite`, `anthropic/claude-*`, or `openai/gpt-*` via one `.env` line
+- → `scripts/services/drug_mapping_service.py` · `scripts/app.py` → `_llm_classify_query()`
 
 **Context / message history / session**
-Per-session history keyed by client-generated UUID (`session_id`). Capped at 5 turns server-side (`_chat_sessions`), sent with every LLM call for follow-up context. Client independently maintains `chatHistory` in `chat.js`.
+- Server: per-session history keyed by UUID (`session_id`), capped at 5 turns in `_chat_sessions`, sent with every LLM call
+- Client: `chatHistory` (10-turn cap) + full thread HTML persisted in `sessionStorage` across tab navigations
+- → `scripts/app.py` → `_chat_sessions` · `frontend/static/js/chat.js` → `saveSessionState()`, `restoreSessionState()`
 
 **Deterministic evaluation metrics**
-`evals/test_deterministic.py` — 47 tests covering savings formulas, unit normalization, risk scoring, band classification, API schema validation, and drug name extraction. All pass without LLM calls.
+- 47 tests: savings formulas, unit normalization, risk scoring, band classification, API schema validation, drug name extraction
+- All pass with no LLM calls — pure deterministic Python
+- → `evals/test_deterministic.py`
+
+**In-context learning and few-shot prompting**
+- `_llm_classify_query` uses a structured system prompt with a JSON output contract to extract drug names or return an out-of-scope reply
+- No fine-tuning required — behavior shaped entirely through prompt design
+- → `scripts/app.py` → `_llm_classify_query()`
 
 ---
 
 ### Module 2 — Tools, Frameworks, and Data
 
 **RAG pipeline (chunk → index → retrieve → generate)**
-When a drug is not in the NADAC/Orange Book warehouse, ChromaDB vector store (30 drug knowledge chunks, embedded via `sentence-transformers/all-MiniLM-L6-v2` — fully local, no API key) retrieves the top-3 relevant chunks and injects them into the LLM prompt as grounding context. File: `scripts/services/rag_service.py`.
-
+- 30 drug knowledge chunks embedded locally via `sentence-transformers/all-MiniLM-L6-v2`
+- ChromaDB retrieves top-3 relevant chunks when a drug is not in the warehouse, injects into LLM system prompt
 ```
 DuckDB warehouse (6 lookup steps)
         ↓ not found
 ChromaDB RAG (top-3 chunks → injected into LLM system prompt)
-        ↓ retrieval failure (graceful)
-LLM with no extra context
-        ↓ USE_LLM=false
-NO_ALTERNATIVE returned
+        ↓ retrieval failure
+NO_ALTERNATIVE returned (deterministic fallback)
 ```
+- → `scripts/services/rag_service.py` · `scripts/services/drug_mapping_service.py`
 
 **Tool contracts and schema validation**
-Every agent emits a typed Pydantic v2 model. The LLM fallback path retries once on validation failure before returning a deterministic result.
+- Every agent emits a typed Pydantic v2 model: `DrugMapping`, `CostAnalysis`, `ClinicalRisk`, `AccessRisk`
+- LLM fallback: validates JSON with `model_validate_json()`, retries once on failure, returns deterministic result on second failure
+- → `scripts/models/schemas.py` , `scripts/agents/librarian_agent.py`, `auditor_agent.py`, `clinician_agent.py`, `social_navigator_agent.py`
 
 **Text-to-SQL / NL-to-SQL**
-`_extract_drug_names()` uses regex tokenization + stop-word filtering + DuckDB prefix validation (`SELECT 1 FROM nadac WHERE UPPER(ndc_description) LIKE 'KEY%'`) to translate free-text questions into structured warehouse queries.
+- `_extract_drug_names()`: tokenizes query → filters stop words → DuckDB prefix validation (`LIKE 'KEY%'`)
+- `_is_nondrug_query()`: regex classifier rejects geography/general-knowledge before any DB hit
+- → `scripts/app.py` → `_extract_drug_names()`, `_is_nondrug_query()`
 
 **Code execution (interpreter pattern)**
-The chat endpoint runs deterministic Python at request time: pandas parses uploaded CSV claims, normalizes columns, executes the full 4-agent pipeline per row, and aggregates results — all at request time with no pre-processing step.
+- pandas parses uploaded claims CSV at request time, normalizes columns, runs 4-agent pipeline per row, aggregates results
+- No pre-processing or background jobs
+- → `scripts/app.py` → `chat_analyze()` , `scripts/services/recommendation_service.py`
 
-**Three distinct data retrieval paths**
-DuckDB SQL (warehouse mart), ChromaDB vector search (drug knowledge RAG), and pandas CSV ingestion (member claims at runtime).
+**Multiple data retrieval paths**
+- DuckDB SQL — NADAC + Orange Book warehouse
+- ChromaDB vector search — drug knowledge RAG
+- pandas CSV — member claims uploaded at runtime
+- → `scripts/services/data_service.py` , `scripts/services/rag_service.py` , `scripts/app.py`
 
 ---
 
 ### Module 3 — Thinking and Planning
 
 **Artifacts**
-- **Switch Package** (Gold only): "Download Switch Package" generates 4 PDFs via `reportlab`, zipped as `switch_package_{id}.zip`:
-  1. **Internal Utilization Management Memo** — for the insurer's pharmacy benefits and clinical review teams
-  2. **Prescriber Clinical Review Letter** — sent to the doctor, explains the proposed generic substitution and asks for approval
-  3. **Member Benefit Letter** — sent to the patient in plain language, explains the possible lower-cost alternative
-  4. **Pharmacy Network Alignment Notice** — sent to the dispensing pharmacy to prepare for the member's next refill
-- **CSV Export**: `/api/export/opportunities.csv` exports filtered opportunities for payer workflow integration
+- 4-PDF Switch Package (Gold only) via `reportlab`, zipped as `switch_package_{id}.zip`:
+  1. Internal Utilization Management Memo — internal payer team
+  2. Prescriber Clinical Review Letter — doctor
+  3. Member Benefit Letter — patient
+  4. Pharmacy Network Alignment Notice — dispensing pharmacy
+- CSV export at `/api/export/opportunities.csv` for payer workflow integration
+- → `scripts/services/document_service.py` · `scripts/app.py` → `/api/documents/{id}`, `/api/export/opportunities.csv`
 
 **State, memory, and persistence**
-Server-side: `_chat_sessions` dict (UUID-keyed, 5-turn cap). Client-side: `sessionStorage` persists the full chat thread, sidebar stats, and history across tab navigations — survives switching to Dashboard and back without losing state. Cleared only on "New Session".
+- Server: `_chat_sessions` dict — UUID-keyed, 5-turn cap, in-memory
+- Client: `sessionStorage` saves full thread HTML, sidebar stats, band pills, and LLM history on every tab switch
+- Restored on page load — switching between Dashboard, Members, and Chat never loses state
+- Cleared only on "New Session" or plan cohort change
+- → `scripts/app.py` → `_chat_sessions` · `frontend/static/js/chat.js` → `saveSessionState()`, `restoreSessionState()`, `clearSession()`
 
 **Iterative refinement / Plan-Execute**
-The 4-stage savings pipeline is a sequential refinement loop where each stage computes a risk penalty and subtracts it from the prior estimate. The final band only emerges after all adjustments are applied.
+- 4-stage sequential pipeline — each stage subtracts a new risk penalty from the running savings estimate
+- Stage 1: gross savings (Auditor) → Stage 2: medical cost delta (Clinician) → Stage 3: adherence penalty (Clinician) → Stage 4: access override + band classification (Scoring)
+- Cannot be short-circuited; final band only emerges after all four stages
+- → `scripts/services/scoring_service.py` · `scripts/services/recommendation_service.py`
 
-**Multi-agent orchestration — orchestrator + specialists**
-`recommendation_service.py` acts as the orchestrator: it sequences the four specialist agents, collects their typed outputs, merges them into a `Recommendation`, and classifies the final band. Each agent has a single narrow responsibility.
+**Multi-agent orchestration (orchestrator + specialists)**
+- `recommendation_service.py` sequences four specialist agents, collects typed Pydantic outputs, merges into a `Recommendation`, classifies final band
+- Each agent has one responsibility and no knowledge of the others
+- → `scripts/services/recommendation_service.py` · `scripts/agents/librarian_agent.py`, `auditor_agent.py`, `clinician_agent.py`, `social_navigator_agent.py`
 
 **Parallel portfolio sweep**
-The CSV upload endpoint processes every claim row through the full 4-agent pipeline and aggregates all results before returning a single portfolio-level response — simulating a parallel sweep over a payer's book of business.
+- Every claim row in an uploaded CSV is processed independently through the full 4-agent pipeline
+- All results collected and aggregated into a single portfolio-level response before returning
+- → `scripts/app.py` → `chat_analyze()` (CSV branch)
 
 ---
 
 ### Module 4 — Agents in the World
 
-**Data Visualization**
-Three Chart.js charts rendered client-side from `/api/recommendations`:
-- Savings by Band (horizontal bar) — gross vs. risk-adjusted across Recommend / Review / Do Not Switch
-- Clinical Risk Distribution (histogram) — opportunities bucketed by risk score
-- Top 10 Drugs by Gross Savings (horizontal bar)
+**Generative UI / data visualization**
+- 3 Chart.js charts, re-render live on every filter change:
+  - Savings by Band — gross vs. risk-adjusted across Recommend / Review / Do Not Switch
+  - Clinical Risk Distribution — histogram bucketed by `clinical_risk_score`
+  - Top 10 Drugs by Gross Savings — ranked horizontal bar
+- → `frontend/static/js/dashboard.js` → `renderCharts()`
+
+**Production deployment**
+- Containerized via Docker, deployed to Google Cloud Run with Cloud Build
+- Single service hosts API, static UI, and document generation
+- Port read from `PORT` env var for Cloud Run autoscaling
+- → `Dockerfile` · `cloudbuild.yaml`
+
+---
+
+### EDA Tool Calls
+
+**Statistical aggregation**
+- Auditor Agent computes per-row gross savings; scoring service aggregates totals and band distributions across the portfolio
+- `/api/dashboard` returns total gross savings, total risk-adjusted savings, band counts via pandas aggregations
+- `/api/members` groups by `member_id` — summing claim counts, drug counts, and savings per member
+- → `scripts/agents/auditor_agent.py` · `scripts/services/scoring_service.py` · `scripts/app.py`
+
+**Filtering and grouping**
+- Live dashboard filters: plan cohort, recommendation band, equivalence type, minimum risk-adjusted savings
+- Each filter re-queries `/api/recommendations` with query params (`band`, `equiv_type`, `min_savings`, `plan`) — re-filtered server-side
+- Member grouping aggregates all recommendations per `member_id` into per-member totals and an `overall_band`
+- → `scripts/app.py` → `/api/recommendations` · `frontend/static/js/dashboard.js` → `applyFiltersAndRender()`
+
+**Specialist sub-agent as analytical tool call**
+- Orchestrator invokes each agent as a typed function call — passes structured input, receives validated Pydantic output
+- Clinician Agent acts as a dedicated "risk analyst": applies diagnosis-group failure rates, prior-switch-failure multipliers, computes risk-adjusted savings with a 95% credible interval
+- → `scripts/services/recommendation_service.py` → `generate_recommendation()` · `scripts/agents/clinician_agent.py` → `assess_clinical_risk()`
+
+**Code execution — pandas at request time**
+- On CSV upload: reads file, normalizes columns, validates required fields, runs 4-agent pipeline row-by-row, aggregates results
+- All computation happens within a single request — no pre-processing or background jobs
+- → `scripts/app.py` → `chat_analyze()` (CSV branch)
+
+**Text analysis — drug name extraction**
+- `_extract_drug_names()`: tokenizes query, filters stop words, validates each token via DuckDB prefix match (`LIKE 'KEY%'`)
+- `_is_nondrug_query()`: regex entity classifier rejects geography/general-knowledge queries before any DB hit
+- → `scripts/app.py` → `_extract_drug_names()`, `_is_nondrug_query()`, `_is_plausible_drug_name()`
+
+---
+
+### Advanced Techniques
+
+**Iterative refinement loop**
+- 4-stage sequential pipeline — each stage adjusts the running savings estimate before passing to the next
+- Stage 1 (Auditor): gross savings from NADAC prices
+- Stage 2 (Clinician): subtract expected medical cost delta
+- Stage 3 (Clinician): subtract adherence penalty
+- Stage 4 (Scoring): apply access risk override → classify final band
+- Pipeline cannot be short-circuited; final answer only emerges after all four stages
+- → `scripts/services/recommendation_service.py` · `scripts/services/scoring_service.py`
+
+**Code execution at runtime**
+- pandas reads uploaded CSV, normalizes it, and executes the full pipeline per row at request time
+- Arithmetic computed in Python: unit cost normalization, `quantity × price`, `probability × event cost`
+- No pre-computed results — every upload triggers a fresh end-to-end run
+- → `scripts/app.py` → `chat_analyze()` · `scripts/agents/auditor_agent.py` → `calculate_costs()`
+
+**Artifacts — persistent outputs**
+- 4-PDF Switch Package (`reportlab`) zipped as `switch_package_{id}.zip` — ready-to-use operational artifact
+- Filtered CSV export at `/api/export/opportunities.csv` — structured output for payer workflow integration
+- Both generated on-demand from live recommendations state, not pre-rendered
+- → `scripts/services/document_service.py` · `scripts/app.py` → `/api/documents/{id}`, `/api/export/opportunities.csv`
+
+**Structured output with schema validation**
+- Every agent emits a typed Pydantic v2 model (`DrugMapping`, `CostAnalysis`, `ClinicalRisk`, `AccessRisk`)
+- LLM fallback: response parsed with `model_validate_json()` — retries once with validation error appended before returning deterministic fallback
+- Query classifier enforces `{"is_drug_query": bool, "drug_names": list, "reply": str}` on every LLM response
+- → `scripts/models/schemas.py` · `scripts/services/drug_mapping_service.py` → `_llm_fallback()` · `scripts/app.py` → `_llm_classify_query()`
+
+**Second distinct data retrieval method**
+- Three independent retrieval mechanisms in one pipeline:
+  1. DuckDB SQL — NADAC + Orange Book pricing and equivalence lookups
+  2. ChromaDB vector search — top-3 semantically similar drug knowledge chunks injected into LLM prompt
+  3. pandas CSV ingestion — member claims uploaded at runtime
+- → `scripts/services/data_service.py` · `scripts/services/rag_service.py` · `scripts/app.py`
+
+**Data visualization**
+- 3 Chart.js charts, re-render live on every filter change:
+  - Savings by Band — gross vs. risk-adjusted across Recommend / Review / Do Not Switch
+  - Clinical Risk Distribution — histogram bucketed by `clinical_risk_score`
+  - Top 10 Drugs by Gross Savings — ranked horizontal bar
+- Members page: inline HTML risk bars per member from `clinical_risk_score`
+- → `frontend/static/js/dashboard.js` → `renderCharts()` · `frontend/static/js/members.js` → `riskBar()`
+
+**Parallel portfolio sweep**
+- Each claim row processed independently through the full 4-agent pipeline
+- All `Recommendation` objects collected, then aggregated: band counts, total savings, member-level rollups
+- Single portfolio-level response returned after all rows complete
+- → `scripts/app.py` → `chat_analyze()` (CSV branch) · `scripts/services/recommendation_service.py`
 
 ---
 
 ### Summary Table
 
-| Concept | Implementation |
-|---------|----------------|
-| Role-based messages | `drug_mapping_service.py → _llm_fallback()` |
-| LiteLLM model adapter | `litellm.completion()` — swap model via `.env` |
-| Context / history / session | `_chat_sessions` (server) + `chatHistory` + `sessionStorage` (client) |
-| Deterministic evaluation | `evals/test_deterministic.py` — 47 tests |
-| RAG pipeline | ChromaDB + sentence-transformers → LLM prompt injection |
-| Tool contracts + schema validation | Pydantic v2 on all agent I/O, LLM retry on failure |
-| Text-to-SQL / NL query | `_extract_drug_names()` → DuckDB prefix validation |
-| Code execution (interpreter) | Runtime pandas CSV processing per request |
-| Multiple retrieval methods | DuckDB SQL + ChromaDB RAG + pandas CSV |
-| Artifacts | 4-PDF switch package (reportlab) + CSV export |
-| State, memory, persistence | UUID session history + `sessionStorage` cross-tab |
-| Iterative refinement / Plan-Execute | 4-stage savings refinement loop |
-| Multi-agent orchestration | Orchestrator + 4 specialist agents |
-| Parallel portfolio sweep | CSV upload → per-row pipeline → aggregated response |
-| Data Visualization | 3 Chart.js charts on dashboard |
+| Concept | File(s) |
+|---------|---------|
+| Role-based messages (system/user/assistant) | `scripts/services/drug_mapping_service.py` |
+| Model adapters — LiteLLM | `scripts/services/drug_mapping_service.py`, `scripts/app.py` |
+| Context / message history / session | `scripts/app.py`, `frontend/static/js/chat.js` |
+| Deterministic evaluation metrics | `evals/test_deterministic.py` |
+| In-context learning / few-shot prompting | `scripts/app.py` → `_llm_classify_query()` |
+| RAG pipeline (chunk → index → retrieve → generate) | `scripts/services/rag_service.py` |
+| Tool contracts + schema validation | `scripts/models/schemas.py`, all agent files |
+| Text-to-SQL / NL-to-SQL | `scripts/app.py` → `_extract_drug_names()` |
+| Code execution (interpreter pattern) | `scripts/app.py` → `chat_analyze()` |
+| Multiple data retrieval methods | `data_service.py`, `rag_service.py`, `app.py` |
+| Artifacts (switch package + CSV export) | `scripts/services/document_service.py` |
+| State, memory, and persistence | `scripts/app.py`, `frontend/static/js/chat.js` |
+| Iterative refinement / Plan-Execute | `scripts/services/scoring_service.py`, `recommendation_service.py` |
+| Multi-agent orchestration | `scripts/services/recommendation_service.py` |
+| Parallel portfolio sweep | `scripts/app.py` → `chat_analyze()` (CSV branch) |
+| Generative UI / data visualization | `frontend/static/js/dashboard.js` |
+| Production deployment (Cloud Run) | `Dockerfile`, `cloudbuild.yaml` |
+| Statistical aggregation (EDA) | `scripts/services/scoring_service.py`, `scripts/app.py` → `/api/dashboard` |
+| Filtering and grouping (EDA) | `scripts/app.py` → `/api/recommendations`, `frontend/static/js/dashboard.js` |
+| Specialist sub-agent analytical tool call | `scripts/agents/clinician_agent.py`, `recommendation_service.py` |
+| Text analysis — drug name extraction | `scripts/app.py` → `_extract_drug_names()`, `_is_nondrug_query()` |
+| Structured output + retry on schema failure | `scripts/services/drug_mapping_service.py`, `scripts/models/schemas.py` |
+| Second retrieval method (SQL + RAG + CSV) | `data_service.py`, `rag_service.py`, `app.py` |
 
 ---
 
