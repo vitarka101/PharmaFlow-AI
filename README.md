@@ -190,6 +190,8 @@ The final band only emerges after all four agents have run. Every number is trac
 
 ## Class Concepts Applied
 
+PharmaFlow AI uses a custom lightweight agent framework: recommendation_service.py acts as the orchestrator, each specialist agent exposes a typed tool function, and all inter-agent outputs are validated through Pydantic schemas.
+
 ### Module 1 — LLMs, Prompt Engineering, and Validation
 
 **Role-based messages (system / user / assistant)**
@@ -429,6 +431,7 @@ NO_ALTERNATIVE returned (deterministic fallback)
 | Aetna Claims | De-identified | 500 member claims — realistic field distributions |
 | Demo CSVs | Aetna Claims Data (De-identified) | `data/demo/` — high-savings and mixed-risk portfolios for live demo |
 
+Here, all claims data is de-identified. A production version would require HIPAA-compliant storage, audit logs, role-based access control, encryption at rest/in transit, and customer-specific BAA/security review before handling PHI.
 ---
 
 ## API Reference
@@ -480,10 +483,6 @@ uv run pytest evals/ -q
 
 ---
 
-## LLM Configuration (Optional)
-
-The full demo works with `USE_LLM=false`. LLM is only used for fallback drug summarization when warehouse lookup fails.
-
 ```bash
 # .env
 USE_LLM=True
@@ -515,7 +514,7 @@ gcloud run deploy $SERVICE \
   --allow-unauthenticated \
   --port 8080 \
   --memory 2Gi \
-  --set-env-vars DATA_MODE=synthetic,USE_LLM=false,SYNC_DATA_TO_GCS=false
+  --set-env-vars DATA_MODE=synthetic,USE_LLM=true,SYNC_DATA_TO_GCS=false
 
 # Validate
 SERVICE_URL=$(gcloud run services describe $SERVICE --region $GCP_REGION --format='value(status.url)')
