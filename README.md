@@ -392,7 +392,7 @@ NO_ALTERNATIVE returned (deterministic fallback)
 
 ### Summary Table
 
-| Concept | File(s) |
+| Class Concept | File(s) |
 |---------|---------|
 | Role-based messages (system/user/assistant) | `scripts/services/drug_mapping_service.py` |
 | Model adapters — LiteLLM | `scripts/services/drug_mapping_service.py`, `scripts/app.py` |
